@@ -20,7 +20,7 @@ from config import Paths, LogConfig
 
 # ================ LOGGER SETUP ================
 
-def setup_logger(name='syamsulai'):
+def setup_logger(name='stocksight'):
     """
     configure application logger
     setup file and console handlers

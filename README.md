@@ -1,4 +1,4 @@
-SyamsulAI/
+Stocksight/
 │
 ├── app.py                    # main gui application
 ├── run.py                    # application runner with checks

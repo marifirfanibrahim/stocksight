@@ -30,7 +30,7 @@ class Paths:
     UTILS_DIR = BASE_DIR / "utils"
     
     # ---------- USER DOCUMENTS ----------
-    USER_DOCS = Path.home() / "Documents" / "SyamsulAI"
+    USER_DOCS = Path.home() / "Documents" / "Stocksight"
     USER_OUTPUT = USER_DOCS / "output"
     
     # ---------- DEFAULT FILES ----------
@@ -96,12 +96,12 @@ class GUIConfig:
     dear pygui settings
     """
     # ---------- WINDOW SETTINGS ----------
-    WINDOW_TITLE = "SyamsulAI - Inventory Forecast"
+    WINDOW_TITLE = "Stocksight - Inventory Forecast"
     WINDOW_WIDTH = 1400
     WINDOW_HEIGHT = 800
     
     # ---------- PANEL SETTINGS ----------
-    LEFT_PANEL_WIDTH = 380  # increased from 300
+    LEFT_PANEL_WIDTH = 320
     
     # ---------- COLORS ----------
     HEADER_COLOR = (255, 200, 100)
@@ -161,6 +161,12 @@ class ScenarioConfig:
     DEFAULT_DELAY_DAYS = 7
     MIN_DELAY_DAYS = 1
     MAX_DELAY_DAYS = 90
+    
+    # ---------- DESCRIPTIONS ----------
+    SCENARIO_TOOLTIPS = {
+        "Demand Spike": "Multiply demand by a factor during selected period.\nUse values >1 for increase, <1 for decrease.",
+        "Supply Delay": "Shift all quantities forward by specified days.\nSimulates delayed shipments or stockouts."
+    }
 
 
 # ================ DATA SETTINGS ================

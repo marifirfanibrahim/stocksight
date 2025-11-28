@@ -69,7 +69,7 @@ def build_executable():
         '-m', 'PyInstaller',
         '--onefile',
         '--windowed',
-        '--name', 'SyamsulAI',
+        '--name', 'Stocksight',
         '--add-data', f'data{os.pathsep}data',
         '--add-data', f'utils{os.pathsep}utils',
         '--hidden-import', 'pandas',
@@ -77,6 +77,8 @@ def build_executable():
         '--hidden-import', 'matplotlib',
         '--hidden-import', 'autots',
         '--hidden-import', 'dearpygui',
+        '--hidden-import', 'sklearn',
+        '--hidden-import', 'statsmodels',
         str(ROOT_DIR / 'app.py')
     ]
     
@@ -85,7 +87,7 @@ def build_executable():
     
     if result.returncode == 0:
         print("build successful")
-        print(f"executable: {DIST_DIR / 'SyamsulAI.exe'}")
+        print(f"executable: {DIST_DIR / 'Stocksight.exe'}")
     else:
         print("build failed")
     
@@ -124,7 +126,7 @@ def create_archive():
     """
     print("creating archive")
     
-    archive_name = ROOT_DIR / "SyamsulAI_dist"
+    archive_name = ROOT_DIR / "Stocksight_dist"
     shutil.make_archive(archive_name, 'zip', DIST_DIR)
     
     print(f"archive created: {archive_name}.zip")
@@ -137,7 +139,7 @@ def main():
     run full build process
     """
     print("=" * 50)
-    print("SYAMSULAI BUILD SCRIPT")
+    print("STOCKSIGHT BUILD SCRIPT")
     print("=" * 50)
     
     # ---------- CHECK REQUIREMENTS ----------

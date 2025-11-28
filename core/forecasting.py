@@ -8,10 +8,14 @@ autots model training and prediction
 
 import threading
 import json
+import gc
+import pickle
+from pathlib import Path
 from autots import AutoTS
 import dearpygui.dearpygui as dpg
+import pandas as pd
 
-from config import AutoTSConfig
+from config import AutoTSConfig, DataConfig
 from core.state import STATE
 from core.data_operations import get_output_directory
 from core.charting import generate_forecast_chart
@@ -24,21 +28,170 @@ from utils.preprocessing import (
 from utils.features import prepare_multicolumn_forecast
 
 
+# ================ MODEL STORAGE ================
+
+last_model = None
+
+
+# ================ MEMORY MANAGEMENT ================
+
+def optimize_dataframe(df):
+    """
+    reduce memory usage of dataframe
+    """
+    for col in df.columns:
+        if df[col].dtype == 'float64':
+            df[col] = df[col].astype('float32')
+        elif df[col].dtype == 'int64':
+            df[col] = df[col].astype('int32')
+    return df
+
+
+def check_data_size(df, max_rows=50000):
+    """
+    check if data needs sampling
+    return sampled df if too large
+    """
+    if len(df) > max_rows:
+        print(f"large dataset detected: {len(df)} rows, sampling to {max_rows}")
+        
+        # sample while keeping date order
+        df_sorted = df.sort_values('Date')
+        
+        # keep recent data
+        df_sampled = df_sorted.tail(max_rows)
+        
+        return df_sampled, True
+    
+    return df, False
+
+
+# ================ MODEL LOADING ================
+
+def load_saved_model(model_path):
+    """
+    load previously saved model
+    """
+    global last_model
+    
+    try:
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+        
+        last_model = model
+        STATE.loaded_model = model
+        STATE.loaded_model_path = str(model_path)
+        
+        print(f"model loaded: {model_path}")
+        return True, "Model loaded successfully"
+        
+    except Exception as e:
+        print(f"model load error: {e}")
+        return False, f"Error loading model: {e}"
+
+
+def forecast_with_loaded_model(update_callback):
+    """
+    run forecast using loaded model
+    """
+    global last_model
+    
+    try:
+        if STATE.loaded_model is None:
+            update_callback(False, "No model loaded", None)
+            return
+        
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
+        
+        # ---------- PREPARE DATA ----------
+        working_data = STATE.clean_data.copy()
+        
+        if STATE.forecast_granularity != 'Daily':
+            working_data = aggregate_before_forecast(working_data, STATE.forecast_granularity)
+        
+        df_pivot = prepare_for_autots(working_data, use_features=False)
+        df_pivot = df_pivot.set_index('Date')
+        
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
+        
+        print("generating forecast with loaded model")
+        
+        # ---------- GENERATE FORECAST ----------
+        prediction = STATE.loaded_model.predict()
+        forecast_df = prediction.forecast
+        upper_forecast = prediction.upper_forecast
+        lower_forecast = prediction.lower_forecast
+        
+        # ---------- STORE RESULTS ----------
+        STATE.forecast_data = forecast_df
+        STATE.upper_forecast = upper_forecast
+        STATE.lower_forecast = lower_forecast
+        
+        # ---------- GENERATE OUTPUTS ----------
+        output_dir = get_output_directory()
+        chart_grouping = dpg.get_value("chart_grouping_combo") if dpg.does_item_exist("chart_grouping_combo") else "Daily"
+        
+        chart_path = generate_forecast_chart(
+            df_pivot, forecast_df, upper_forecast, lower_forecast, chart_grouping
+        )
+        
+        export_forecast_csv(forecast_df, output_dir / "forecast_data.csv")
+        
+        update_callback(True, "Forecast complete (loaded model)", chart_path)
+        
+    except Exception as e:
+        print(f"forecast error: {e}")
+        import traceback
+        traceback.print_exc()
+        update_callback(False, f"Forecast error: {e}", None)
+    
+    finally:
+        STATE.is_forecasting = False
+        gc.collect()
+
+
 # ================ FORECASTING ================
 
 def run_forecast_thread(update_callback):
     """
     execute autots forecast in thread
-    update_callback for ui updates
     """
+    global last_model
+    
     try:
+        STATE.reset_cancel_flag()
+        
         # ---------- GET WORKING DATA ----------
         working_data = STATE.clean_data.copy()
+        
+        # ---------- CHECK DATA SIZE ----------
+        working_data, was_sampled = check_data_size(working_data)
+        if was_sampled:
+            print("data was sampled for memory efficiency")
+        
+        # ---------- OPTIMIZE MEMORY ----------
+        working_data = optimize_dataframe(working_data)
+        
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
         
         # ---------- PRE-AGGREGATE IF NEEDED ----------
         if STATE.forecast_granularity != 'Daily':
             working_data = aggregate_before_forecast(working_data, STATE.forecast_granularity)
             print(f"forecasting at {STATE.forecast_granularity} granularity")
+        
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
         
         # ---------- PREPARE DATA ----------
         if STATE.feature_columns and STATE.use_features:
@@ -57,6 +210,9 @@ def run_forecast_thread(update_callback):
         
         # ---------- SET DATE INDEX ----------
         df_pivot = df_pivot.set_index('Date')
+        
+        # ---------- OPTIMIZE PIVOT ----------
+        df_pivot = optimize_dataframe(df_pivot)
         
         # ---------- CHECK DATA LENGTH ----------
         data_length = len(df_pivot)
@@ -78,6 +234,11 @@ def run_forecast_thread(update_callback):
             print(f"adjusted forecast from {forecast_periods} to {max_forecast} periods")
             forecast_periods = max_forecast
         
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
+        
         # ---------- CALCULATE MIN TRAIN PERCENT ----------
         min_train_pct = max(0.5, 1 - (forecast_periods / data_length))
         
@@ -85,11 +246,18 @@ def run_forecast_thread(update_callback):
         if STATE.forecast_granularity == 'Weekly':
             frequency = 'W'
         elif STATE.forecast_granularity == 'Monthly':
-            frequency = 'M'
+            frequency = 'MS'
         elif STATE.forecast_granularity == 'Quarterly':
-            frequency = 'Q'
+            frequency = 'QS'
         else:
             frequency = 'infer'
+        
+        # ---------- LIMIT SKU COUNT FOR MEMORY ----------
+        num_skus = len(df_pivot.columns)
+        if num_skus > 50:
+            print(f"limiting skus from {num_skus} to 50 for memory")
+            top_skus = df_pivot.sum().nlargest(50).index.tolist()
+            df_pivot = df_pivot[top_skus]
         
         # ---------- CONFIGURE AUTOTS ----------
         model = AutoTS(
@@ -107,20 +275,27 @@ def run_forecast_thread(update_callback):
             constraint=None,
             drop_most_recent=0,
             prediction_interval=AutoTSConfig.PREDICTION_INTERVAL,
-            random_seed=42
+            random_seed=42,
+            verbose=0
         )
         
-        print(f"training autots model with {data_length} data points")
-        print(f"forecast periods: {forecast_periods} ({STATE.forecast_granularity})")
-        print(f"prediction interval: {AutoTSConfig.PREDICTION_INTERVAL}")
+        print(f"training autots model with {data_length} data points, {len(df_pivot.columns)} skus")
         
-        if STATE.seasonality_info.get('has_monthly_seasonality'):
-            print("detected monthly seasonality")
-        if STATE.seasonality_info.get('has_weekly_seasonality'):
-            print("detected weekly seasonality")
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
         
         # ---------- FIT MODEL ----------
         model = model.fit(df_pivot)
+        
+        # ---------- CHECK CANCELLATION ----------
+        if STATE.is_cancelled():
+            update_callback(False, "Forecast cancelled", None)
+            return
+        
+        # ---------- STORE MODEL ----------
+        last_model = model
         
         print("generating forecast")
         
@@ -135,14 +310,15 @@ def run_forecast_thread(update_callback):
         STATE.upper_forecast = upper_forecast
         STATE.lower_forecast = lower_forecast
         
+        # ---------- CLEANUP MEMORY ----------
+        del working_data
+        gc.collect()
+        
         # ---------- GET OUTPUT DIRECTORY ----------
         output_dir = get_output_directory()
         
         # ---------- GET CHART GROUPING ----------
-        try:
-            chart_grouping = dpg.get_value("chart_grouping_combo")
-        except:
-            chart_grouping = "Daily"
+        chart_grouping = dpg.get_value("chart_grouping_combo") if dpg.does_item_exist("chart_grouping_combo") else "Daily"
         
         # ---------- GENERATE CHART WITH GROUPING ----------
         chart_path = generate_forecast_chart(
@@ -155,8 +331,6 @@ def run_forecast_thread(update_callback):
         
         # ---------- EXPORT DATA ----------
         export_forecast_csv(forecast_df, output_dir / "forecast_data.csv")
-        
-        # ---------- EXPORT CONFIDENCE BOUNDS ----------
         upper_forecast.to_csv(output_dir / "forecast_upper.csv", index=True)
         lower_forecast.to_csv(output_dir / "forecast_lower.csv", index=True)
         
@@ -168,17 +342,20 @@ def run_forecast_thread(update_callback):
             with open(output_dir / "seasonality_info.json", 'w') as f:
                 json.dump(STATE.seasonality_info, f, indent=2, default=str)
         
-        print(f"forecast complete")
-        print(f"saved to: {output_dir}")
-        
         granularity_label = f" ({STATE.forecast_granularity})" if STATE.forecast_granularity != 'Daily' else ""
-        update_callback(True, f"Forecast complete: {forecast_periods} periods{granularity_label} | Saved to {output_dir}", chart_path)
+        update_callback(True, f"Forecast complete: {forecast_periods} periods{granularity_label}", chart_path)
+        
+    except MemoryError:
+        print("memory error during forecast")
+        gc.collect()
+        update_callback(False, "Out of memory - try smaller dataset or aggregation", None)
         
     except Exception as e:
         print(f"forecast error: {e}")
         import traceback
         traceback.print_exc()
-        update_callback(False, f"Forecast error: {str(e)}", None)
+        update_callback(False, f"Forecast error: {e}", None)
     
     finally:
         STATE.is_forecasting = False
+        gc.collect()
