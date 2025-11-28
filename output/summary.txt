@@ -1,0 +1,15 @@
+INVENTORY FORECAST SUMMARY
+Generated: 2025-11-28 12:44:09
+Date Format: %d %B %Y
+
+ORIGINAL DATA STATISTICS
+Total Records: 450
+Date Range: 2024-01-01 00:00:00 to 2024-03-30 00:00:00
+Unique SKUs: 5
+
+FORECAST SUMMARY
+Forecast Periods: 30
+
+SEASONALITY ANALYSIS
+Monthly Pattern: Yes (CV: 0.23)
+Weekly Pattern: Yes (CV: 0.14)

@@ -1,101 +1,462 @@
+"""
+preprocessing utilities for inventory data
+clean and validate csv files
+prepare data for autots forecasting
+export forecast results
+"""
+
+
+# ================ IMPORTS ================
+
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import os
+import sys
+from datetime import datetime
 
-def normalize_column_names(df):
-    """
-    Normalize column names to handle case sensitivity
-    """
-    df.columns = [col.strip().lower() for col in df.columns]
-    return df
+# ---------- ADD CONFIG PATH ----------
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def validate_data(df):
+try:
+    from config import DataConfig
+except ImportError:
+    class DataConfig:
+        DATE_FORMATS = [
+            '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y', '%d/%m/%Y',
+            '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%b %d, %Y', '%B %d, %Y'
+        ]
+
+
+# ================ DATE FORMAT DETECTION ================
+
+def detect_date_format(date_series):
     """
-    Validate inventory dataset structure and data quality
+    detect original date format
+    return format string
     """
-    errors = []
+    sample = str(date_series.iloc[0])
     
-    # Normalize column names first
-    df = normalize_column_names(df)
+    for fmt in DataConfig.DATE_FORMATS:
+        try:
+            datetime.strptime(sample, fmt)
+            print(f"detected date format: {fmt}")
+            return fmt
+        except ValueError:
+            continue
     
-    # Check required columns (case insensitive)
-    required_columns = ['date', 'sku', 'quantity']
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        errors.append(f"Missing required columns: {', '.join(missing_columns)}")
-        return False, errors
-    
-    # Check data types
+    # fallback
+    return '%Y-%m-%d'
+
+
+def parse_dates_flexible(date_series):
+    """
+    parse dates with multiple format attempts
+    handle various date formats
+    """
+    # ---------- TRY PANDAS AUTO ----------
     try:
-        df['date'] = pd.to_datetime(df['date'])
+        parsed = pd.to_datetime(date_series, infer_datetime_format=True)
+        print("dates parsed with pandas auto detection")
+        return parsed
     except:
-        errors.append("Date column must contain valid dates")
+        pass
+    
+    # ---------- TRY EACH FORMAT ----------
+    for fmt in DataConfig.DATE_FORMATS:
+        try:
+            parsed = pd.to_datetime(date_series, format=fmt)
+            print(f"dates parsed with format: {fmt}")
+            return parsed
+        except:
+            continue
+    
+    # ---------- TRY DATEUTIL PARSER ----------
+    try:
+        from dateutil import parser
+        parsed = date_series.apply(lambda x: parser.parse(str(x)))
+        print("dates parsed with dateutil parser")
+        return parsed
+    except:
+        pass
+    
+    # ---------- FINAL ATTEMPT ----------
+    try:
+        parsed = pd.to_datetime(date_series, errors='coerce')
+        if parsed.isna().sum() == 0:
+            print("dates parsed with coerce mode")
+            return parsed
+    except:
+        pass
+    
+    raise ValueError("unable to parse dates with known formats")
+
+
+def format_dates_output(date_series, original_format):
+    """
+    format dates back to original format
+    for display and export
+    """
+    if original_format is None:
+        return date_series.astype(str)
     
     try:
-        df['quantity'] = pd.to_numeric(df['quantity'])
+        return date_series.dt.strftime(original_format)
     except:
-        errors.append("Quantity column must contain numeric values")
-    
-    # Check for missing values
-    if df[['date', 'sku', 'quantity']].isnull().any().any():
-        errors.append("Dataset contains missing values")
-    
-    # Check for negative quantities
-    if (df['quantity'] < 0).any():
-        errors.append("Dataset contains negative quantities")
-    
-    return len(errors) == 0, errors
+        return date_series.astype(str)
 
-def clean_data(df):
-    """
-    Clean and preprocess the inventory data
-    """
-    # Normalize column names first
-    df = normalize_column_names(df)
-    
-    # Convert to proper data types
-    df['date'] = pd.to_datetime(df['date'])
-    df['quantity'] = pd.to_numeric(df['quantity'])
-    
-    # Remove duplicates
-    df = df.drop_duplicates()
-    
-    # Sort by date and SKU
-    df = df.sort_values(['date', 'sku'])
-    
-    return df
 
-def prepare_forecast_data(df, sku_column='sku', value_column='quantity'):
+# ================ DATA VALIDATION ================
+
+def validate_columns(df):
     """
-    Prepare data for AutoTS forecasting
+    check required columns exist
+    return validation status and message
     """
-    # Normalize column names first
-    df = normalize_column_names(df)
+    # ---------- COLUMN CHECK ----------
+    required = ['Date', 'SKU', 'Quantity']
+    missing = [col for col in required if col not in df.columns]
     
-    # Pivot data for time series format
-    pivot_df = df.pivot_table(
-        index='date', 
-        columns=sku_column, 
-        values=value_column, 
+    if missing:
+        return False, f"Missing columns: {missing}"
+    
+    return True, "Validation passed"
+
+
+def validate_data_types(df):
+    """
+    check data types are correct
+    return validation status and message
+    """
+    # ---------- DATE CHECK ----------
+    try:
+        parse_dates_flexible(df['Date'])
+    except Exception as e:
+        return False, f"Date column invalid: {str(e)}"
+    
+    # ---------- QUANTITY CHECK ----------
+    if not pd.api.types.is_numeric_dtype(df['Quantity']):
+        try:
+            pd.to_numeric(df['Quantity'])
+        except Exception:
+            return False, "Quantity column not numeric"
+    
+    return True, "Data types valid"
+
+
+# ================ DATA CLEANING ================
+
+def clean_dataframe(df, store_format=True):
+    """
+    clean and standardize dataframe
+    handle missing values
+    convert data types
+    """
+    from core.state import STATE
+    
+    # ---------- COPY DATA ----------
+    df_clean = df.copy()
+    
+    # ---------- DETECT AND STORE FORMAT ----------
+    if store_format:
+        STATE.detected_date_format = detect_date_format(df_clean['Date'])
+        STATE.original_date_format = STATE.detected_date_format
+    
+    # ---------- DATE CONVERSION ----------
+    df_clean['Date'] = parse_dates_flexible(df_clean['Date'])
+    
+    # ---------- QUANTITY CONVERSION ----------
+    df_clean['Quantity'] = pd.to_numeric(df_clean['Quantity'], errors='coerce')
+    
+    # ---------- HANDLE MISSING ----------
+    df_clean = df_clean.dropna(subset=['Date', 'SKU'])
+    df_clean['Quantity'] = df_clean['Quantity'].fillna(0)
+    
+    # ---------- SORT BY DATE ----------
+    df_clean = df_clean.sort_values('Date').reset_index(drop=True)
+    
+    # ---------- REMOVE DUPLICATES ----------
+    df_clean = df_clean.drop_duplicates(subset=['Date', 'SKU'], keep='last')
+    
+    return df_clean
+
+
+def prepare_for_autots(df, use_features=False):
+    """
+    prepare dataframe for autots format
+    pivot data for multiple sku handling
+    """
+    # ---------- PIVOT DATA ----------
+    df_pivot = df.pivot_table(
+        index='Date',
+        columns='SKU',
+        values='Quantity',
         aggfunc='sum'
     ).fillna(0)
     
-    return pivot_df
+    # ---------- RESET INDEX ----------
+    df_pivot = df_pivot.reset_index()
+    df_pivot.columns.name = None
+    
+    # ---------- FEATURE HANDLING ----------
+    if use_features:
+        from utils.features import detect_additional_columns, prepare_exogenous_features
+        
+        feature_cols = detect_additional_columns(df)
+        if feature_cols:
+            print(f"detected feature columns: {feature_cols}")
+            exog_data, encoders = prepare_exogenous_features(df, feature_cols)
+            return df_pivot, exog_data, encoders
+    
+    return df_pivot
 
-def export_forecast(forecast_df, filename=None):
+
+# ================ DATE GROUPING ================
+
+def group_by_period(df, period='Weekly'):
     """
-    Export forecast results to CSV
+    group data by time period
+    aggregate quantities
     """
-    if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"forecast_{timestamp}.csv"
+    df_grouped = df.copy()
     
-    output_dir = "output"
-    os.makedirs(output_dir, exist_ok=True)
+    if period == 'Daily':
+        return df_grouped
     
-    filepath = os.path.join(output_dir, filename)
-    forecast_df.to_csv(filepath)
+    elif period == 'Weekly':
+        df_grouped['Period'] = df_grouped['Date'].dt.to_period('W').dt.start_time
     
-    return filepath
+    elif period == 'Monthly':
+        df_grouped['Period'] = df_grouped['Date'].dt.to_period('M').dt.start_time
+    
+    elif period == 'Quarterly':
+        df_grouped['Period'] = df_grouped['Date'].dt.to_period('Q').dt.start_time
+    
+    # ---------- AGGREGATE ----------
+    if 'SKU' in df_grouped.columns:
+        grouped = df_grouped.groupby(['Period', 'SKU'])['Quantity'].sum().reset_index()
+        grouped = grouped.rename(columns={'Period': 'Date'})
+    else:
+        grouped = df_grouped.groupby('Period').sum().reset_index()
+        grouped = grouped.rename(columns={'Period': 'Date'})
+    
+    return grouped
+
+
+def group_forecast_by_period(forecast_df, upper_df, lower_df, period='Weekly'):
+    """
+    group forecast data by period
+    return aggregated forecast with margins
+    """
+    if period == 'Daily':
+        error_margins = upper_df - lower_df
+        return forecast_df, upper_df, lower_df, error_margins
+    
+    # ---------- ADD PERIOD COLUMN ----------
+    forecast_copy = forecast_df.copy()
+    upper_copy = upper_df.copy()
+    lower_copy = lower_df.copy()
+    
+    if period == 'Weekly':
+        forecast_copy['Period'] = pd.to_datetime(forecast_copy.index).to_period('W').start_time
+        upper_copy['Period'] = pd.to_datetime(upper_copy.index).to_period('W').start_time
+        lower_copy['Period'] = pd.to_datetime(lower_copy.index).to_period('W').start_time
+    
+    elif period == 'Monthly':
+        forecast_copy['Period'] = pd.to_datetime(forecast_copy.index).to_period('M').start_time
+        upper_copy['Period'] = pd.to_datetime(upper_copy.index).to_period('M').start_time
+        lower_copy['Period'] = pd.to_datetime(lower_copy.index).to_period('M').start_time
+    
+    elif period == 'Quarterly':
+        forecast_copy['Period'] = pd.to_datetime(forecast_copy.index).to_period('Q').start_time
+        upper_copy['Period'] = pd.to_datetime(upper_copy.index).to_period('Q').start_time
+        lower_copy['Period'] = pd.to_datetime(lower_copy.index).to_period('Q').start_time
+    
+    # ---------- AGGREGATE ----------
+    forecast_grouped = forecast_copy.groupby('Period').sum()
+    upper_grouped = upper_copy.groupby('Period').sum()
+    lower_grouped = lower_copy.groupby('Period').sum()
+    
+    error_margins = upper_grouped - lower_grouped
+    
+    return forecast_grouped, upper_grouped, lower_grouped, error_margins
+
+
+# ================ SCENARIO SIMULATION ================
+
+def apply_demand_spike(df, sku, multiplier, start_date, end_date):
+    """
+    simulate demand spike for sku
+    multiply quantity by factor in date range
+    """
+    # ---------- COPY DATA ----------
+    df_sim = df.copy()
+    
+    # ---------- DATE FILTER ----------
+    mask = (
+        (df_sim['SKU'] == sku) &
+        (df_sim['Date'] >= pd.to_datetime(start_date)) &
+        (df_sim['Date'] <= pd.to_datetime(end_date))
+    )
+    
+    # ---------- APPLY MULTIPLIER ----------
+    df_sim.loc[mask, 'Quantity'] = df_sim.loc[mask, 'Quantity'] * multiplier
+    
+    return df_sim
+
+
+def apply_supply_delay(df, sku, delay_days, start_date):
+    """
+    simulate supply chain delay
+    shift quantities forward by days
+    """
+    # ---------- COPY DATA ----------
+    df_sim = df.copy()
+    
+    # ---------- SKU FILTER ----------
+    sku_mask = df_sim['SKU'] == sku
+    sku_data = df_sim[sku_mask].copy()
+    
+    # ---------- SHIFT DATES ----------
+    sku_data['Date'] = sku_data['Date'] + pd.Timedelta(days=delay_days)
+    
+    # ---------- UPDATE DATAFRAME ----------
+    df_sim = df_sim[~sku_mask]
+    df_sim = pd.concat([df_sim, sku_data], ignore_index=True)
+    df_sim = df_sim.sort_values('Date').reset_index(drop=True)
+    
+    return df_sim
+
+
+# ================ EXPORT FUNCTIONS ================
+
+def export_forecast_csv(forecast_df, output_path, original_format=None):
+    """
+    export forecast dataframe to csv
+    save in output directory
+    """
+    from core.state import STATE
+    
+    # ---------- ENSURE DIRECTORY ----------
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # ---------- FORMAT DATES ----------
+    export_df = forecast_df.copy()
+    
+    if original_format or STATE.detected_date_format:
+        fmt = original_format or STATE.detected_date_format
+        if hasattr(export_df.index, 'strftime'):
+            export_df.index = export_df.index.strftime(fmt)
+    
+    # ---------- SAVE CSV ----------
+    export_df.to_csv(output_path, index=True)
+    
+    return output_path
+
+
+def export_summary_report(forecast_df, original_df, output_path):
+    """
+    generate summary report
+    include statistics and forecast metrics
+    """
+    from core.state import STATE
+    
+    # ---------- ENSURE DIRECTORY ----------
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # ---------- BUILD REPORT ----------
+    report_lines = []
+    report_lines.append("INVENTORY FORECAST SUMMARY")
+    report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report_lines.append(f"Date Format: {STATE.detected_date_format}")
+    report_lines.append("")
+    report_lines.append("ORIGINAL DATA STATISTICS")
+    report_lines.append(f"Total Records: {len(original_df)}")
+    report_lines.append(f"Date Range: {original_df['Date'].min()} to {original_df['Date'].max()}")
+    report_lines.append(f"Unique SKUs: {original_df['SKU'].nunique()}")
+    report_lines.append("")
+    report_lines.append("FORECAST SUMMARY")
+    report_lines.append(f"Forecast Periods: {len(forecast_df)}")
+    
+    # ---------- SEASONALITY INFO ----------
+    if STATE.seasonality_info:
+        report_lines.append("")
+        report_lines.append("SEASONALITY ANALYSIS")
+        if STATE.seasonality_info.get('has_monthly_seasonality'):
+            report_lines.append(f"Monthly Pattern: Yes (CV: {STATE.seasonality_info.get('monthly_cv', 0):.2f})")
+        else:
+            report_lines.append("Monthly Pattern: No")
+        if STATE.seasonality_info.get('has_weekly_seasonality'):
+            report_lines.append(f"Weekly Pattern: Yes (CV: {STATE.seasonality_info.get('weekly_cv', 0):.2f})")
+        else:
+            report_lines.append("Weekly Pattern: No")
+    
+    # ---------- WRITE FILE ----------
+    with open(output_path, 'w') as f:
+        f.write('\n'.join(report_lines))
+    
+    return output_path
+
+
+# ================ PRE-AGGREGATION ================
+
+def aggregate_before_forecast(df, granularity='Daily'):
+    """
+    aggregate data before forecasting
+    for noisy daily data
+    """
+    if granularity == 'Daily':
+        return df
+    
+    df_agg = df.copy()
+    df_agg['Date'] = pd.to_datetime(df_agg['Date'])
+    
+    if granularity == 'Weekly':
+        df_agg['Period'] = df_agg['Date'].dt.to_period('W').dt.start_time
+    elif granularity == 'Monthly':
+        df_agg['Period'] = df_agg['Date'].dt.to_period('M').dt.start_time
+    elif granularity == 'Quarterly':
+        df_agg['Period'] = df_agg['Date'].dt.to_period('Q').dt.start_time
+    else:
+        return df
+    
+    # ---------- AGGREGATE BY PERIOD AND SKU ----------
+    agg_cols = {'Quantity': 'sum'}
+    
+    # Keep additional numeric columns
+    for col in df_agg.columns:
+        if col not in ['Date', 'SKU', 'Quantity', 'Period']:
+            if pd.api.types.is_numeric_dtype(df_agg[col]):
+                agg_cols[col] = 'mean'
+    
+    grouped = df_agg.groupby(['Period', 'SKU']).agg(agg_cols).reset_index()
+    grouped = grouped.rename(columns={'Period': 'Date'})
+    
+    print(f"aggregated data from {len(df)} to {len(grouped)} rows ({granularity})")
+    
+    return grouped
+
+
+# ================ FILE UTILITIES ================
+
+def get_sku_list(df):
+    """
+    extract unique sku values
+    return sorted list
+    """
+    return sorted(df['SKU'].unique().tolist())
+
+
+def filter_by_sku(df, sku):
+    """
+    filter dataframe by single sku
+    return filtered dataframe
+    """
+    return df[df['SKU'] == sku].copy()
+
+
+def get_date_range(df):
+    """
+    get min and max dates
+    return tuple of dates
+    """
+    return df['Date'].min(), df['Date'].max()
