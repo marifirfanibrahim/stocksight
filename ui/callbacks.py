@@ -403,13 +403,23 @@ def start_forecast_timer():
 
 
 def stop_forecast_timer():
+    """
+    stop timer and return elapsed time
+    """
+    elapsed = 0
+    if TIMER_STATE['start_time'] is not None:
+        elapsed = time.time() - TIMER_STATE['start_time']
+    
     TIMER_STATE['running'] = False
+    TIMER_STATE['start_time'] = None
     
     try:
         safe_set_label("forecast_btn", "Run Forecast")
         safe_bind_theme("forecast_btn", "forecast_button_theme")
     except:
         pass
+    
+    return elapsed
 
 
 # ================ FILE LOADING ================
@@ -635,7 +645,15 @@ def forecast_callback():
     update_status("Forecasting... please wait")
     
     def on_forecast_complete(success, message, chart_path):
-        stop_forecast_timer()
+        elapsed = stop_forecast_timer()
+        
+        # format elapsed time
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        if minutes > 0:
+            time_str = f"({minutes}m {seconds}s)"
+        else:
+            time_str = f"({seconds}s)"
         
         dpg.split_frame()
         
@@ -644,6 +662,7 @@ def forecast_callback():
                 update_forecast_display(chart_path)
                 update_dashboard()
                 update_seasonality_display()
+                message = f"{message} {time_str}"
             else:
                 if dpg.does_item_exist("chart_image_group"):
                     for child in dpg.get_item_children("chart_image_group", 1):
@@ -686,13 +705,23 @@ def forecast_with_model_callback():
     update_status("Forecasting with loaded model...")
     
     def on_forecast_complete(success, message, chart_path):
-        stop_forecast_timer()
+        elapsed = stop_forecast_timer()
+        
+        # format elapsed time
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        if minutes > 0:
+            time_str = f"({minutes}m {seconds}s)"
+        else:
+            time_str = f"({seconds}s)"
+        
         dpg.split_frame()
         
         try:
             if success:
                 update_forecast_display(chart_path)
                 update_dashboard()
+                message = f"{message} {time_str}"
             
             update_status(message, success=success, error=not success)
         except Exception as e:
@@ -1193,3 +1222,109 @@ def update_dashboard_callback():
 
 def grouping_changed_callback(sender, app_data):
     update_dashboard()
+
+
+def show_forecast_diagnostics_callback():
+    """
+    show sku forecast diagnostics window
+    """
+    if STATE.clean_data is None:
+        return update_status("No data loaded", error=True)
+    
+    # analyze all skus
+    diagnostics = []
+    
+    for sku in STATE.sku_list:
+        sku_data = STATE.clean_data[STATE.clean_data['SKU'] == sku]
+        
+        total_qty = sku_data['Quantity'].sum()
+        record_count = len(sku_data)
+        date_range = (sku_data['Date'].min(), sku_data['Date'].max())
+        
+        # determine status
+        if sku in STATE.successful_skus:
+            status = "Forecasted"
+            status_color = GUIConfig.SUCCESS_COLOR
+        elif sku in STATE.skipped_skus:
+            status = STATE.skipped_skus[sku]
+            status_color = GUIConfig.ERROR_COLOR
+        elif STATE.forecast_data is not None:
+            status = "Not processed"
+            status_color = GUIConfig.WARNING_COLOR
+        else:
+            # analyze potential issues
+            if total_qty == 0:
+                status = "All zeros (no sales)"
+                status_color = (180, 180, 180)
+            elif record_count < DataConfig.MIN_DATA_POINTS:
+                status = f"Only {record_count} records (need {DataConfig.MIN_DATA_POINTS})"
+                status_color = (180, 180, 180)
+            else:
+                status = "Ready"
+                status_color = (200, 200, 200)
+        
+        diagnostics.append({
+            'sku': sku,
+            'status': status,
+            'status_color': status_color,
+            'records': record_count,
+            'total_qty': total_qty,
+            'date_range': date_range
+        })
+    
+    # create diagnostics window
+    safe_delete_item("diagnostics_window")
+    
+    with dpg.window(label="SKU Forecast Diagnostics", tag="diagnostics_window",
+                   width=800, height=600, pos=[300, 100]):
+        
+        dpg.add_text("SKU FORECAST DIAGNOSTICS", color=GUIConfig.HEADER_COLOR)
+        dpg.add_separator()
+        dpg.add_spacer(height=5)
+        
+        # summary
+        total_skus = len(diagnostics)
+        successful = len(STATE.successful_skus)
+        skipped = len(STATE.skipped_skus)
+        
+        dpg.add_text(f"Total SKUs: {total_skus}")
+        if STATE.forecast_data is not None:
+            dpg.add_text(f"Forecasted: {successful}", color=GUIConfig.SUCCESS_COLOR)
+            if skipped > 0:
+                dpg.add_text(f"Skipped: {skipped}", color=GUIConfig.ERROR_COLOR)
+        
+        dpg.add_spacer(height=10)
+        dpg.add_separator()
+        dpg.add_spacer(height=5)
+        
+        # table
+        with dpg.table(header_row=True, resizable=True, 
+                       borders_innerH=True, borders_outerH=True,
+                       borders_innerV=True, borders_outerV=True,
+                       scrollY=True, height=-50):
+            
+            dpg.add_table_column(label="SKU", width_fixed=True, init_width_or_weight=120)
+            dpg.add_table_column(label="Status", width_stretch=True)
+            dpg.add_table_column(label="Records", width_fixed=True, init_width_or_weight=80)
+            dpg.add_table_column(label="Total Qty", width_fixed=True, init_width_or_weight=100)
+            dpg.add_table_column(label="Date Range", width_stretch=True)
+            
+            for diag in diagnostics:
+                with dpg.table_row():
+                    dpg.add_text(str(diag['sku']))
+                    dpg.add_text(str(diag['status']), color=diag['status_color'])
+                    dpg.add_text(f"{diag['records']}")
+                    dpg.add_text(f"{diag['total_qty']:,.0f}")
+                    
+                    date_start = diag['date_range'][0]
+                    date_end = diag['date_range'][1]
+                    if hasattr(date_start, 'strftime'):
+                        dpg.add_text(f"{date_start:%Y-%m-%d} to {date_end:%Y-%m-%d}")
+                    else:
+                        dpg.add_text(f"{date_start} to {date_end}")
+        
+        dpg.add_spacer(height=10)
+        
+        close_btn = dpg.add_button(label="Close", width=100,
+                                   callback=lambda: safe_delete_item("diagnostics_window"))
+        dpg.bind_item_theme(close_btn, "danger_button_theme")

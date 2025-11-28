@@ -16,9 +16,15 @@ from pathlib import Path
 
 # ================ PATHS ================
 
-ROOT_DIR = Path(__file__).parent.parent.absolute()
-DIST_DIR = ROOT_DIR / "dist"
-BUILD_DIR = ROOT_DIR / "build"
+# stocksight directory (where build.py lives)
+STOCKSIGHT_DIR = Path(__file__).parent.absolute()
+
+# project root (parent of stocksight)
+PROJECT_ROOT = STOCKSIGHT_DIR.parent
+
+# output directories
+DIST_DIR = PROJECT_ROOT / "dist"
+BUILD_DIR = PROJECT_ROOT / "build"
 
 
 # ================ BUILD FUNCTIONS ================
@@ -36,7 +42,7 @@ def clean_build():
         shutil.rmtree(BUILD_DIR)
     
     # ---------- REMOVE SPEC FILE ----------
-    spec_file = ROOT_DIR / "app.spec"
+    spec_file = PROJECT_ROOT / "Stocksight.spec"
     if spec_file.exists():
         spec_file.unlink()
     
@@ -57,11 +63,56 @@ def check_pyinstaller():
         return False
 
 
+def check_dependencies():
+    """
+    verify required packages installed
+    """
+    required = [
+        'pandas',
+        'numpy', 
+        'matplotlib',
+        'autots',
+        'dearpygui',
+        'sklearn',
+        'statsmodels',
+        'openpyxl'
+    ]
+    
+    missing = []
+    
+    for pkg in required:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    
+    if missing:
+        print(f"missing packages: {missing}")
+        print(f"install with: pip install {' '.join(missing)}")
+        return False
+    
+    print("all dependencies found")
+    return True
+
+
 def build_executable():
     """
     create standalone executable
     """
     print("building executable")
+    
+    # ---------- ENTRY POINT ----------
+    entry_point = STOCKSIGHT_DIR / "app.py"
+    
+    if not entry_point.exists():
+        print(f"entry point not found: {entry_point}")
+        return False
+    
+    # ---------- DATA DIRECTORIES ----------
+    data_dir = STOCKSIGHT_DIR / "data"
+    utils_dir = STOCKSIGHT_DIR / "utils"
+    ui_dir = STOCKSIGHT_DIR / "ui"
+    core_dir = STOCKSIGHT_DIR / "core"
     
     # ---------- BUILD COMMAND ----------
     cmd = [
@@ -70,30 +121,72 @@ def build_executable():
         '--onefile',
         '--windowed',
         '--name', 'Stocksight',
-        '--add-data', f'data{os.pathsep}data',
-        '--add-data', f'utils{os.pathsep}utils',
+        
+        # ---------- HIDDEN IMPORTS ----------
         '--hidden-import', 'pandas',
         '--hidden-import', 'numpy',
         '--hidden-import', 'matplotlib',
+        '--hidden-import', 'matplotlib.backends.backend_agg',
         '--hidden-import', 'autots',
         '--hidden-import', 'dearpygui',
+        '--hidden-import', 'dearpygui.dearpygui',
         '--hidden-import', 'sklearn',
+        '--hidden-import', 'sklearn.preprocessing',
+        '--hidden-import', 'sklearn.utils',
         '--hidden-import', 'statsmodels',
+        '--hidden-import', 'statsmodels.tsa',
         '--hidden-import', 'openpyxl',
         '--hidden-import', 'xlrd',
-        str(ROOT_DIR / 'app.py')
+        '--hidden-import', 'concurrent.futures',
+        '--hidden-import', 'multiprocessing',
+        '--hidden-import', 'threading',
+        '--hidden-import', 'pickle',
+        '--hidden-import', 'json',
+        '--hidden-import', 'calendar',
+        '--hidden-import', 'gc',
+        
+        # ---------- COLLECT SUBMODULES ----------
+        '--collect-submodules', 'autots',
+        '--collect-submodules', 'statsmodels',
+        '--collect-submodules', 'sklearn',
+        '--collect-submodules', 'dearpygui',
+        
+        # ---------- ENTRY POINT ----------
+        str(entry_point)
     ]
     
+    # ---------- ADD DATA DIRECTORIES IF EXIST ----------
+    if data_dir.exists():
+        cmd.extend(['--add-data', f'{data_dir}{os.pathsep}data'])
+    
+    if utils_dir.exists():
+        cmd.extend(['--add-data', f'{utils_dir}{os.pathsep}utils'])
+    
+    if ui_dir.exists():
+        cmd.extend(['--add-data', f'{ui_dir}{os.pathsep}ui'])
+    
+    if core_dir.exists():
+        cmd.extend(['--add-data', f'{core_dir}{os.pathsep}core'])
+    
+    # ---------- ADD CONFIG ----------
+    config_file = STOCKSIGHT_DIR / "config.py"
+    if config_file.exists():
+        cmd.extend(['--add-data', f'{config_file}{os.pathsep}.'])
+    
     # ---------- RUN BUILD ----------
-    result = subprocess.run(cmd, cwd=ROOT_DIR)
+    print(f"running pyinstaller from: {PROJECT_ROOT}")
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     
     if result.returncode == 0:
         print("build successful")
-        print(f"executable: {DIST_DIR / 'Stocksight.exe'}")
+        exe_path = DIST_DIR / "Stocksight.exe"
+        if exe_path.exists():
+            print(f"executable: {exe_path}")
+            print(f"size: {exe_path.stat().st_size / (1024*1024):.1f} MB")
+        return True
     else:
         print("build failed")
-    
-    return result.returncode == 0
+        return False
 
 
 def copy_resources():
@@ -109,15 +202,23 @@ def copy_resources():
     os.makedirs(dist_data, exist_ok=True)
     os.makedirs(dist_output, exist_ok=True)
     
-    # ---------- COPY SAMPLE DATA ----------
-    sample_csv = ROOT_DIR / "data" / "inventory.csv"
-    if sample_csv.exists():
-        shutil.copy(sample_csv, dist_data)
+    # # ---------- COPY SAMPLE DATA ----------
+    # sample_csv = STOCKSIGHT_DIR / "data" / "inventory.csv"
+    # if sample_csv.exists():
+    #     shutil.copy(sample_csv, dist_data)
+    #     print(f"copied: {sample_csv.name}")
     
-    # ---------- COPY README ----------
-    readme = ROOT_DIR / "README.md"
-    if readme.exists():
-        shutil.copy(readme, DIST_DIR)
+    # # ---------- COPY README ----------
+    # readme = PROJECT_ROOT / "README.md"
+    # if readme.exists():
+    #     shutil.copy(readme, DIST_DIR)
+    #     print(f"copied: {readme.name}")
+    
+    # # ---------- COPY LICENSE ----------
+    # license_file = PROJECT_ROOT / "LICENSE"
+    # if license_file.exists():
+    #     shutil.copy(license_file, DIST_DIR)
+    #     print(f"copied: {license_file.name}")
     
     print("resources copied")
 
@@ -128,10 +229,29 @@ def create_archive():
     """
     print("creating archive")
     
-    archive_name = ROOT_DIR / "Stocksight_dist"
-    shutil.make_archive(archive_name, 'zip', DIST_DIR)
+    archive_name = PROJECT_ROOT / "Stocksight_dist"
+    shutil.make_archive(str(archive_name), 'zip', DIST_DIR)
     
-    print(f"archive created: {archive_name}.zip")
+    archive_path = Path(str(archive_name) + ".zip")
+    print(f"archive created: {archive_path}")
+    print(f"archive size: {archive_path.stat().st_size / (1024*1024):.1f} MB")
+
+
+def create_run_script():
+    """
+    create batch file to run the executable
+    """
+    batch_content = '''@echo off
+cd /d "%~dp0"
+Stocksight.exe
+pause
+'''
+    
+    batch_path = DIST_DIR / "Run_Stocksight.bat"
+    with open(batch_path, 'w') as f:
+        f.write(batch_content)
+    
+    print(f"created: {batch_path.name}")
 
 
 # ================ MAIN ================
@@ -143,9 +263,15 @@ def main():
     print("=" * 50)
     print("STOCKSIGHT BUILD SCRIPT")
     print("=" * 50)
+    print(f"stocksight dir: {STOCKSIGHT_DIR}")
+    print(f"project root: {PROJECT_ROOT}")
+    print("=" * 50)
     
     # ---------- CHECK REQUIREMENTS ----------
     if not check_pyinstaller():
+        sys.exit(1)
+    
+    if not check_dependencies():
         sys.exit(1)
     
     # ---------- CLEAN ----------
@@ -158,11 +284,16 @@ def main():
     # ---------- COPY RESOURCES ----------
     copy_resources()
     
+    # ---------- CREATE RUN SCRIPT ----------
+    create_run_script()
+    
     # ---------- CREATE ARCHIVE ----------
     create_archive()
     
     print("=" * 50)
     print("BUILD COMPLETE")
+    print("=" * 50)
+    print(f"output: {DIST_DIR}")
     print("=" * 50)
 
 

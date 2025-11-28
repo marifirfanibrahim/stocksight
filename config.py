@@ -98,9 +98,13 @@ class LargeDataConfig:
     """
     # ---------- THRESHOLDS ----------
     MAX_ROWS = 100000
-    MAX_SKUS = 30
+    MAX_SKUS = 100  # increased from 30
     MAX_SKUS_CHART = 15
     MAX_SKUS_DASHBOARD = 10
+    
+    # ---------- PARALLEL SETTINGS ----------
+    PARALLEL_THRESHOLD = 10
+    MAX_WORKERS = 8
     
     # ---------- SAMPLING ----------
     SAMPLE_ROWS = 50000

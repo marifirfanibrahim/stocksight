@@ -28,7 +28,7 @@ class AppState:
         
         # ---------- COLUMNS ----------
         self.additional_columns = []
-        self.column_mapping = {} 
+        self.column_mapping = {}
         
         # ---------- DATE FORMAT ----------
         self.detected_date_format = '%Y-%m-%d'
@@ -42,6 +42,10 @@ class AppState:
         self.cancel_forecast = threading.Event()
         self.loaded_model = None
         self.loaded_model_path = None
+        
+        # ---------- FORECAST RESULTS ----------
+        self.skipped_skus = {}  # sku -> reason
+        self.successful_skus = []
         
         # ---------- OUTPUT ----------
         self.custom_output_dir = None
@@ -80,6 +84,8 @@ class AppState:
         self.original_forecast = None
         self.original_upper = None
         self.original_lower = None
+        self.skipped_skus = {}
+        self.successful_skus = []
     
     def reset_cancel_flag(self):
         """

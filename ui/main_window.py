@@ -278,8 +278,13 @@ def _create_dashboard_tab_content():
                                          callback=callbacks.show_seasonality_chart_callback,
                                          width=80)
         dpg.bind_item_theme(seasonality_btn, "summary_chart_theme")
-    
-    dpg.add_spacer(height=10)
+        
+        dpg.add_spacer(width=10)
+        
+        diagnostics_btn = dpg.add_button(label="SKU Report", 
+                                         callback=callbacks.show_forecast_diagnostics_callback,
+                                         width=80)
+        dpg.bind_item_theme(diagnostics_btn, "export_button_theme")
     
     # ---------- STATISTICS ----------
     dpg.add_text("STATISTICS", color=GUIConfig.HEADER_COLOR)
@@ -397,6 +402,8 @@ def create_gui():
                 dpg.add_menu_item(label="Toggle Summary", callback=callbacks.toggle_summary_callback)
                 dpg.add_menu_item(label="Seasonality Chart", callback=callbacks.show_seasonality_chart_callback)
                 dpg.add_menu_item(label="Refresh Dashboard", callback=callbacks.update_dashboard_callback)
+                dpg.add_separator()
+                dpg.add_menu_item(label="SKU Diagnostics", callback=callbacks.show_forecast_diagnostics_callback)
         
         # ---------- MAIN LAYOUT ----------
         with dpg.group(horizontal=True):
