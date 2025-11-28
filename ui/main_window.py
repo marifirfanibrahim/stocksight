@@ -26,13 +26,25 @@ def _create_controls_tab_content():
     dpg.add_text("DATA", color=GUIConfig.HEADER_COLOR)
     dpg.add_separator()
     
-    upload_btn = dpg.add_button(label="Upload CSV", callback=callbacks.upload_callback, width=-1)
+    upload_btn = dpg.add_button(label="Upload CSV/Excel", callback=callbacks.upload_callback, width=-1)
     dpg.bind_item_theme(upload_btn, "upload_button_theme")
+    
+    dpg.add_spacer(height=5)
+    
+    remap_btn = dpg.add_button(label="Remap Columns", callback=callbacks.remap_columns_callback, width=-1)
+    dpg.bind_item_theme(remap_btn, "export_button_theme")
     
     dpg.add_spacer(height=5)
     
     remove_btn = dpg.add_button(label="Remove Data", callback=callbacks.remove_data_callback, width=-1)
     dpg.bind_item_theme(remove_btn, "danger_button_theme")
+    
+    dpg.add_spacer(height=10)
+    
+    # ---------- SEASONALITY INFO ----------
+    dpg.add_text("SEASONALITY", color=GUIConfig.HEADER_COLOR)
+    dpg.add_separator()
+    dpg.add_text("No data analyzed", tag="seasonality_info_text", color=(150, 150, 150), wrap=280)
     
     dpg.add_spacer(height=15)
     
@@ -41,11 +53,13 @@ def _create_controls_tab_content():
     dpg.add_separator()
     
     dpg.add_text("Days:")
-    dpg.add_slider_int(default_value=AutoTSConfig.DEFAULT_FORECAST_DAYS, 
-                       min_value=AutoTSConfig.MIN_FORECAST_DAYS, 
-                       max_value=365, 
-                       callback=callbacks.forecast_days_callback, 
-                       tag="forecast_days", width=-1)
+    dpg.add_input_int(default_value=AutoTSConfig.DEFAULT_FORECAST_DAYS, 
+                      min_value=AutoTSConfig.MIN_FORECAST_DAYS, 
+                      max_value=365,
+                      min_clamped=True,
+                      max_clamped=True,
+                      callback=callbacks.forecast_days_callback, 
+                      tag="forecast_days", width=-1)
     
     dpg.add_text("Granularity:")
     dpg.add_combo(DataConfig.GROUP_OPTIONS, default_value="Daily", 
@@ -54,7 +68,7 @@ def _create_controls_tab_content():
     
     dpg.add_spacer(height=10)
     
-    # forecast button with simple label
+    # forecast button
     forecast_btn = dpg.add_button(label="Run Forecast", tag="forecast_btn",
                                   callback=callbacks.forecast_callback, 
                                   width=-1, height=40)
@@ -98,7 +112,7 @@ def _create_controls_tab_content():
         
         model_btn = dpg.add_button(label="Save Model", callback=callbacks.export_model_callback, width=85)
         dpg.bind_item_theme(model_btn, "export_button_theme")
-
+        
 
 def _create_scenarios_tab_content():
     """
@@ -189,7 +203,7 @@ def _create_scenarios_tab_content():
 
 def _create_chart_tab_content():
     """
-    create content for chart tab with proper scrolling
+    create content for chart tab
     """
     with dpg.group(horizontal=True):
         dpg.add_text("Grouping:")
@@ -201,7 +215,7 @@ def _create_chart_tab_content():
         
         dpg.add_text("SKU:")
         dpg.add_combo(["All SKUs"], default_value="All SKUs",
-                      tag="chart_sku_combo", width=110,
+                      tag="chart_sku_combo", width=120,
                       callback=callbacks.chart_sku_changed_callback)
         
         dpg.add_spacer(width=10)
@@ -210,7 +224,12 @@ def _create_chart_tab_content():
                                      callback=callbacks.toggle_summary_callback,
                                      width=100)
         dpg.bind_item_theme(summary_btn, "summary_chart_theme")
-    
+        
+        dpg.add_spacer(width=10)
+        
+        zoom_btn = dpg.add_button(label="Zoom Chart", callback=callbacks.zoom_chart_callback)
+        dpg.bind_item_theme(zoom_btn, "export_button_theme")
+
     dpg.add_separator()
     dpg.add_spacer(height=5)
     
@@ -228,10 +247,11 @@ def _create_chart_tab_content():
 
 def _create_dashboard_tab_content():
     """
-    create content for dashboard tab with error percentages
+    create content for dashboard tab
     """
     dpg.add_spacer(height=5)
     
+    # ---------- CONTROLS ----------
     with dpg.group(horizontal=True):
         dpg.add_text("Grouping:")
         dpg.add_combo(DataConfig.GROUP_OPTIONS, default_value="Daily",
@@ -240,57 +260,81 @@ def _create_dashboard_tab_content():
         
         dpg.add_spacer(width=10)
         
+        dpg.add_text("SKU:")
+        dpg.add_combo(["All SKUs"], default_value="All SKUs",
+                      tag="dashboard_sku_combo", width=120,
+                      callback=callbacks.dashboard_sku_changed_callback)
+        
+        dpg.add_spacer(width=10)
+        
         refresh_btn = dpg.add_button(label="Refresh", 
                                      callback=callbacks.update_dashboard_callback,
                                      width=70)
         dpg.bind_item_theme(refresh_btn, "refresh_chart_theme")
+        
+        dpg.add_spacer(width=10)
+        
+        seasonality_btn = dpg.add_button(label="Seasonality", 
+                                         callback=callbacks.show_seasonality_chart_callback,
+                                         width=80)
+        dpg.bind_item_theme(seasonality_btn, "summary_chart_theme")
     
     dpg.add_spacer(height=10)
     
+    # ---------- STATISTICS ----------
     dpg.add_text("STATISTICS", color=GUIConfig.HEADER_COLOR)
     dpg.add_separator()
     dpg.add_spacer(height=5)
     
-    with dpg.table(header_row=False, borders_innerV=True, borders_outerV=True,
-                   borders_innerH=True, borders_outerH=True):
-        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
-        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
-        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
-        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
+    with dpg.group(horizontal=True):
+        with dpg.child_window(width=180, height=50, border=False):
+            dpg.add_text("Total Forecast", color=(180, 180, 180))
+            stat1 = dpg.add_text("--", tag="stat_total_forecast", wrap=170)
+            dpg.bind_item_font(stat1, "stat_font")
+            
+        with dpg.child_window(width=180, height=50, border=False):
+            dpg.add_text("Avg Daily", color=(180, 180, 180))
+            stat2 = dpg.add_text("--", tag="stat_avg_daily", wrap=170)
+            dpg.bind_item_font(stat2, "stat_font")
+            
+        with dpg.child_window(width=120, height=50, border=False):
+            dpg.add_text("Periods", color=(180, 180, 180))
+            stat3 = dpg.add_text("--", tag="stat_num_periods")
+            dpg.bind_item_font(stat3, "stat_font")
         
-        with dpg.table_row():
-            with dpg.group():
-                dpg.add_text("Total Forecast", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_total_forecast")
-            with dpg.group():
-                dpg.add_text("Avg Daily", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_avg_daily")
-            with dpg.group():
-                dpg.add_text("Periods", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_num_periods")
-            with dpg.group():
-                dpg.add_text("SKUs", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_num_skus")
+        with dpg.child_window(width=120, height=50, border=False):
+            dpg.add_text("SKUs", color=(180, 180, 180))
+            stat4 = dpg.add_text("--", tag="stat_num_skus")
+            dpg.bind_item_font(stat4, "stat_font")
+    
+    dpg.add_spacer(height=5)
+    
+    with dpg.group(horizontal=True):
+        with dpg.child_window(width=220, height=50, border=False):
+            dpg.add_text("Date Range", color=(180, 180, 180))
+            dpg.add_text("--", tag="stat_date_range", wrap=210)
         
-        with dpg.table_row():
-            with dpg.group():
-                dpg.add_text("Date Range", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_date_range")
-            with dpg.group():
-                dpg.add_text("95% Confidence", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_confidence")
-            with dpg.group():
-                dpg.add_text("Avg Error", color=GUIConfig.HEADER_COLOR)
-                dpg.add_text("--", tag="stat_error_pct")
-            with dpg.group():
-                dpg.add_text("Range (+/-)", color=GUIConfig.HEADER_COLOR)
-                with dpg.group(horizontal=True):
-                    dpg.add_text("--", tag="stat_upper_pct", color=(100, 255, 100))
-                    dpg.add_text("/", color=(150, 150, 150))
-                    dpg.add_text("--", tag="stat_lower_pct", color=(255, 100, 100))
+        with dpg.child_window(width=200, height=50, border=False):
+            dpg.add_text("95% Confidence", color=(180, 180, 180))
+            dpg.add_text("--", tag="stat_confidence", wrap=190)
+        
+        with dpg.child_window(width=180, height=50, border=False):
+            dpg.add_text("Avg Error", color=(180, 180, 180))
+            stat5 = dpg.add_text("--", tag="stat_error_pct", wrap=170)
+            dpg.bind_item_font(stat5, "stat_font")
     
-    dpg.add_spacer(height=15)
+    dpg.add_spacer(height=10)
     
+    # ---------- SEASONALITY CHART CONTAINER ----------
+    with dpg.group(tag="seasonality_chart_container", show=False):
+        dpg.add_text("SEASONALITY PATTERN", color=GUIConfig.HEADER_COLOR)
+        dpg.add_separator()
+        with dpg.group(tag="seasonality_chart_group"):
+            pass
+        dpg.add_button(label="Hide", callback=callbacks.hide_seasonality_chart, width=60)
+        dpg.add_spacer(height=10)
+    
+    # ---------- FORECAST TABLE ----------
     dpg.add_text("FORECAST BY PERIOD", color=GUIConfig.HEADER_COLOR)
     dpg.add_separator()
     dpg.add_spacer(height=5)
@@ -311,10 +355,13 @@ def create_gui():
     create_column_mapping_dialog()
     
     # ---------- FILE DIALOG ----------
-    with dpg.file_dialog(show=False, callback=callbacks.load_csv_callback, 
+    with dpg.file_dialog(show=False, callback=callbacks.load_file_callback, 
                          cancel_callback=callbacks.cancel_load_callback, 
                          tag="file_dialog", width=700, height=400):
-        dpg.add_file_extension(".csv")
+        dpg.add_file_extension(".csv", color=(100, 255, 100, 255), custom_text="[CSV]")
+        dpg.add_file_extension(".xlsx", color=(100, 200, 255, 255), custom_text="[Excel]")
+        dpg.add_file_extension(".xls", color=(100, 200, 255, 255), custom_text="[Excel]")
+        dpg.add_file_extension(".*", color=(150, 150, 150, 255))
     
     # ---------- FOLDER DIALOG ----------
     with dpg.file_dialog(show=False, callback=callbacks.folder_selected_callback,
@@ -327,7 +374,8 @@ def create_gui():
     with dpg.file_dialog(show=False, callback=callbacks.load_model_file_callback,
                          cancel_callback=callbacks.cancel_load_callback,
                          tag="model_file_dialog", width=700, height=400):
-        dpg.add_file_extension(".pkl")
+        dpg.add_file_extension(".pkl", color=(100, 255, 100, 255), custom_text="[Model]")
+        dpg.add_file_extension(".*", color=(150, 150, 150, 255))
     
     # ---------- MAIN WINDOW ----------
     with dpg.window(label="Inventory Forecast", tag="main_window"):
@@ -335,7 +383,7 @@ def create_gui():
         # ---------- MENU BAR ----------
         with dpg.menu_bar():
             with dpg.menu(label="File"):
-                dpg.add_menu_item(label="Upload CSV", callback=callbacks.upload_callback)
+                dpg.add_menu_item(label="Upload CSV/Excel", callback=callbacks.upload_callback)
                 dpg.add_menu_item(label="Load Model", callback=callbacks.load_model_callback)
                 dpg.add_separator()
                 dpg.add_menu_item(label="Set Export Directory", callback=callbacks.select_export_dir_callback)
@@ -345,7 +393,9 @@ def create_gui():
                 dpg.add_menu_item(label="Exit", callback=lambda: dpg.stop_dearpygui())
             
             with dpg.menu(label="View"):
+                dpg.add_menu_item(label="Zoom Chart", callback=callbacks.zoom_chart_callback)
                 dpg.add_menu_item(label="Toggle Summary", callback=callbacks.toggle_summary_callback)
+                dpg.add_menu_item(label="Seasonality Chart", callback=callbacks.show_seasonality_chart_callback)
                 dpg.add_menu_item(label="Refresh Dashboard", callback=callbacks.update_dashboard_callback)
         
         # ---------- MAIN LAYOUT ----------
@@ -365,7 +415,7 @@ def create_gui():
                     with dpg.tab(label="Data Preview"):
                         with dpg.child_window(border=False, horizontal_scrollbar=True):
                             dpg.add_group(tag="preview_group")
-                            dpg.add_text("Load a CSV to see data preview.", parent="preview_group")
+                            dpg.add_text("Load a CSV or Excel file to see data preview.", parent="preview_group")
                     
                     with dpg.tab(label="Forecast Chart"):
                         with dpg.group(tag="chart_group"):

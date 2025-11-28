@@ -59,6 +59,7 @@ class AutoTSConfig:
     NUM_VALIDATIONS = 1
     VALIDATION_METHOD = 'backwards'
     MODEL_LIST = 'fast'
+    # MODEL_LIST = ['GluonTS', 'PytorchForecasting'] <-- gpu
     TRANSFORMER_LIST = 'fast'
     N_JOBS = 'auto'
     
@@ -87,6 +88,31 @@ class AutoTSConfig:
         'model_list': 'all',
         'transformer_list': 'all'
     }
+
+
+# ================ LARGE DATA SETTINGS ================
+
+class LargeDataConfig:
+    """
+    settings for handling large datasets
+    """
+    # ---------- THRESHOLDS ----------
+    MAX_ROWS = 100000
+    MAX_SKUS = 30
+    MAX_SKUS_CHART = 15
+    MAX_SKUS_DASHBOARD = 10
+    
+    # ---------- SAMPLING ----------
+    SAMPLE_ROWS = 50000
+    KEEP_RECENT = True
+    
+    # ---------- MEMORY ----------
+    OPTIMIZE_DTYPES = True
+    FORCE_GC = True
+    
+    # ---------- CHART ----------
+    LOW_DPI = 60
+    MAX_CHART_HEIGHT = 50
 
 
 # ================ GUI SETTINGS ================
@@ -124,7 +150,7 @@ class ChartConfig:
     """
     # ---------- FIGURE SIZE ----------
     FIGURE_WIDTH = 12
-    FIGURE_HEIGHT_PER_SKU = 4
+    FIGURE_HEIGHT_PER_SKU = 3
     
     # ---------- DPI ----------
     SAVE_DPI = 100
@@ -161,12 +187,6 @@ class ScenarioConfig:
     DEFAULT_DELAY_DAYS = 7
     MIN_DELAY_DAYS = 1
     MAX_DELAY_DAYS = 90
-    
-    # ---------- DESCRIPTIONS ----------
-    SCENARIO_TOOLTIPS = {
-        "Demand Spike": "Multiply demand by a factor during selected period.\nUse values >1 for increase, <1 for decrease.",
-        "Supply Delay": "Shift all quantities forward by specified days.\nSimulates delayed shipments or stockouts."
-    }
 
 
 # ================ DATA SETTINGS ================

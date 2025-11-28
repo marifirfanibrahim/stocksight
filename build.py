@@ -79,6 +79,8 @@ def build_executable():
         '--hidden-import', 'dearpygui',
         '--hidden-import', 'sklearn',
         '--hidden-import', 'statsmodels',
+        '--hidden-import', 'openpyxl',
+        '--hidden-import', 'xlrd',
         str(ROOT_DIR / 'app.py')
     ]
     

@@ -28,6 +28,7 @@ class AppState:
         
         # ---------- COLUMNS ----------
         self.additional_columns = []
+        self.column_mapping = {} 
         
         # ---------- DATE FORMAT ----------
         self.detected_date_format = '%Y-%m-%d'

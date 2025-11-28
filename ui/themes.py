@@ -16,6 +16,11 @@ def create_all_themes():
     create all button themes
     call once during gui setup
     """
+    # ---------- FONT REGISTRY ----------
+    with dpg.font_registry():
+        # add font for stat values
+        dpg.add_font("C:\\Windows\\Fonts\\Arial.ttf", 20, tag="stat_font")
+    
     # ---------- RUN FORECAST BUTTON THEME ----------
     with dpg.theme(tag="forecast_button_theme"):
         with dpg.theme_component(dpg.mvButton):

@@ -18,6 +18,7 @@ class TempDataClass:
         self.pending_df = None
         self.pending_path = None
         self.additional_columns = []
+        self.original_data = None 
 
 TEMP_DATA = TempDataClass()
 
@@ -38,7 +39,6 @@ def confirm_mapping_callback(sender, app_data):
     validate and apply column mapping
     """
     from ui.callbacks import process_loaded_data
-    from core.state import STATE
     
     msg, color = validate_mapping_selection()
     dpg.set_value("mapping_validation_text", msg)
@@ -54,6 +54,14 @@ def confirm_mapping_callback(sender, app_data):
     # get additional columns
     additional_cols = get_selected_additional_columns()
     TEMP_DATA.additional_columns = additional_cols
+    
+    # store original column names mapping (new -> old)
+    from core.state import STATE
+    STATE.column_mapping = {
+        'Date': date_col,
+        'SKU': sku_col,
+        'Quantity': qty_col
+    }
     
     # rename required columns
     rename_map = {
@@ -83,6 +91,40 @@ def cancel_mapping_callback(sender, app_data):
     
     hide_column_mapping_dialog()
     update_status("Loading cancelled", warning=True)
+
+
+def select_all_additional_callback(sender, app_data):
+    """
+    select all additional columns
+    """
+    if not dpg.does_item_exist("additional_columns_group"):
+        return
+    
+    children = dpg.get_item_children("additional_columns_group", 1)
+    for child in children:
+        try:
+            item_type = dpg.get_item_type(child)
+            if "Checkbox" in item_type:
+                dpg.set_value(child, True)
+        except:
+            pass
+
+
+def deselect_all_additional_callback(sender, app_data):
+    """
+    deselect all additional columns
+    """
+    if not dpg.does_item_exist("additional_columns_group"):
+        return
+    
+    children = dpg.get_item_children("additional_columns_group", 1)
+    for child in children:
+        try:
+            item_type = dpg.get_item_type(child)
+            if "Checkbox" in item_type:
+                dpg.set_value(child, False)
+        except:
+            pass
 
 
 def get_selected_additional_columns():
@@ -151,9 +193,9 @@ def create_column_mapping_dialog():
                    tag="mapping_dialog",
                    modal=True,
                    show=False,
-                   width=600,
-                   height=600,
-                   pos=[400, 100],
+                   width=580,
+                   height=420,
+                   pos=[410, 190],
                    no_resize=False):
         
         dpg.add_text("COLUMN MAPPING", color=GUIConfig.HEADER_COLOR)
@@ -162,53 +204,52 @@ def create_column_mapping_dialog():
         dpg.add_spacer(height=5)
         
         dpg.add_text("Select which column represents each required field:", 
-                    wrap=580, color=(200, 200, 200))
+                    wrap=560, color=(200, 200, 200))
         
-        dpg.add_spacer(height=10)
+        dpg.add_spacer(height=15)
         
         # ---------- REQUIRED COLUMNS ----------
         dpg.add_text("REQUIRED COLUMNS", color=GUIConfig.HEADER_COLOR)
         dpg.add_separator()
+        dpg.add_spacer(height=5)
         
         with dpg.group(horizontal=True):
             with dpg.group():
                 dpg.add_text("Date:")
-                dpg.add_combo([], tag="mapping_date_combo", width=170)
+                dpg.add_combo([], tag="mapping_date_combo", width=165)
             
             with dpg.group():
                 dpg.add_text("SKU/Product:")
-                dpg.add_combo([], tag="mapping_sku_combo", width=170)
+                dpg.add_combo([], tag="mapping_sku_combo", width=165)
             
             with dpg.group():
                 dpg.add_text("Quantity:")
-                dpg.add_combo([], tag="mapping_quantity_combo", width=170)
+                dpg.add_combo([], tag="mapping_quantity_combo", width=165)
         
         dpg.add_spacer(height=15)
         
-        # ---------- ADDITIONAL COLUMNS ----------
-        dpg.add_text("ADDITIONAL COLUMNS (optional)", color=GUIConfig.HEADER_COLOR)
-        dpg.add_separator()
-        dpg.add_text("Select extra columns to include in preview:", color=(150, 150, 150))
-        
-        with dpg.child_window(height=100, border=True, tag="additional_columns_window"):
-            with dpg.group(tag="additional_columns_group"):
-                dpg.add_text("Load data to see columns", color=(120, 120, 120))
+        # ---------- ADDITIONAL COLUMNS (COLLAPSIBLE) ----------
+        with dpg.collapsing_header(label="ADDITIONAL COLUMNS (click to expand)", 
+                                   tag="additional_columns_header",
+                                   default_open=False):
+            
+            dpg.add_text("Select extra columns to include:", color=(150, 150, 150))
+            
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Select All", callback=select_all_additional_callback, width=80)
+                dpg.add_button(label="Deselect All", callback=deselect_all_additional_callback, width=80)
+            
+            dpg.add_spacer(height=5)
+            
+            # scrollable container for columns
+            with dpg.child_window(height=120, border=True, tag="additional_columns_window"):
+                with dpg.group(tag="additional_columns_group"):
+                    dpg.add_text("Load data to see columns", color=(120, 120, 120))
         
         dpg.add_spacer(height=15)
-        
-        # ---------- PREVIEW ----------
-        dpg.add_text("DATA PREVIEW", color=GUIConfig.HEADER_COLOR)
-        dpg.add_separator()
-        
-        with dpg.child_window(height=150, border=True, tag="mapping_preview_window", 
-                             horizontal_scrollbar=True):
-            with dpg.group(tag="mapping_preview_group"):
-                pass
-        
-        dpg.add_spacer(height=10)
         
         # ---------- VALIDATION MESSAGE ----------
-        dpg.add_text("", tag="mapping_validation_text", wrap=580)
+        dpg.add_text("", tag="mapping_validation_text", wrap=560)
         
         dpg.add_spacer(height=10)
         
@@ -233,9 +274,13 @@ def show_column_mapping_dialog(df, suggestions):
     """
     columns = df.columns.tolist()
     
-    dpg.configure_item("mapping_date_combo", items=columns)
-    dpg.configure_item("mapping_sku_combo", items=columns)
-    dpg.configure_item("mapping_quantity_combo", items=columns)
+    # callback to refresh additional columns when combos change
+    def refresh_additional_callback(sender, app_data):
+        populate_additional_columns(df, suggestions)
+    
+    dpg.configure_item("mapping_date_combo", items=columns, callback=refresh_additional_callback)
+    dpg.configure_item("mapping_sku_combo", items=columns, callback=refresh_additional_callback)
+    dpg.configure_item("mapping_quantity_combo", items=columns, callback=refresh_additional_callback)
     
     if suggestions['date']:
         dpg.set_value("mapping_date_combo", suggestions['date'])
@@ -252,69 +297,42 @@ def show_column_mapping_dialog(df, suggestions):
     elif len(columns) > 2:
         dpg.set_value("mapping_quantity_combo", columns[2])
     
-    # populate additional columns
+    # populate additional columns based on initial selections
     populate_additional_columns(df, suggestions)
     
-    update_mapping_preview(df)
     dpg.set_value("mapping_validation_text", "")
     dpg.configure_item("mapping_dialog", show=True)
-
+    
 
 def populate_additional_columns(df, suggestions):
     """
     populate additional columns checkboxes
+    only show columns not selected as required fields
     """
     # clear existing
     for child in dpg.get_item_children("additional_columns_group", 1):
         dpg.delete_item(child)
     
-    # get required columns
-    required = [
-        suggestions.get('date'),
-        suggestions.get('sku'),
-        suggestions.get('quantity')
-    ]
+    # get CURRENTLY selected required columns from combos
+    date_col = dpg.get_value("mapping_date_combo")
+    sku_col = dpg.get_value("mapping_sku_combo")
+    qty_col = dpg.get_value("mapping_quantity_combo")
     
-    # add checkboxes for non-required columns
+    required = [date_col, sku_col, qty_col]
+    
+    # add checkboxes for non-required columns only
     additional = [col for col in df.columns if col not in required]
     
     if not additional:
-        dpg.add_text("No additional columns found", parent="additional_columns_group", 
+        dpg.add_text("No additional columns available", parent="additional_columns_group", 
                     color=(120, 120, 120))
         return
     
+    # update header label with count
+    dpg.set_item_label("additional_columns_header", f"ADDITIONAL COLUMNS ({len(additional)} available)")
+    
     for col in additional:
         dpg.add_checkbox(label=col, parent="additional_columns_group", default_value=False)
-
-
-def update_mapping_preview(df):
-    """
-    show preview of csv data with auto-fit columns
-    """
-    for child in dpg.get_item_children("mapping_preview_group", 1):
-        dpg.delete_item(child)
-    
-    preview = df.head(5)
-    
-    # calculate column widths based on content
-    col_widths = {}
-    for col in preview.columns:
-        max_len = max(len(str(col)), preview[col].astype(str).str.len().max())
-        col_widths[col] = min(max(max_len * 8, 60), 200)
-    
-    with dpg.table(header_row=True, parent="mapping_preview_group",
-                   borders_innerH=True, borders_outerH=True,
-                   borders_innerV=True, borders_outerV=True,
-                   scrollX=True, resizable=True):
-        
-        for col in preview.columns:
-            dpg.add_table_column(label=str(col), init_width_or_weight=col_widths[col])
-        
-        for _, row in preview.iterrows():
-            with dpg.table_row():
-                for val in row:
-                    text = str(val)[:30]
-                    dpg.add_text(text)
 
 
 def hide_column_mapping_dialog():
