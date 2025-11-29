@@ -7,6 +7,42 @@ button and widget styling
 # ================ IMPORTS ================
 
 import dearpygui.dearpygui as dpg
+import platform
+import os
+
+
+# ================ FONT HELPER ================
+
+def get_system_font():
+    """
+    get system font path based on os
+    """
+    system = platform.system()
+    
+    if system == "Windows":
+        candidates = [
+            "C:\\Windows\\Fonts\\Arial.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+            "C:\\Windows\\Fonts\\tahoma.ttf",
+        ]
+    elif system == "Darwin":
+        candidates = [
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/SFNS.ttf",
+            "/Library/Fonts/Arial.ttf",
+        ]
+    else:
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ]
+    
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    
+    return None
 
 
 # ================ THEME CREATION ================
@@ -18,8 +54,15 @@ def create_all_themes():
     """
     # ---------- FONT REGISTRY ----------
     with dpg.font_registry():
-        # add font for stat values
-        dpg.add_font("C:\\Windows\\Fonts\\Arial.ttf", 20, tag="stat_font")
+        font_path = get_system_font()
+        if font_path and os.path.exists(font_path):
+            try:
+                dpg.add_font(font_path, 20, tag="stat_font")
+            except Exception as e:
+                print(f"font load warning: {e}")
+                # Continue without custom font
+        else:
+            print("no system font found, using default")
     
     # ---------- RUN FORECAST BUTTON THEME ----------
     with dpg.theme(tag="forecast_button_theme"):

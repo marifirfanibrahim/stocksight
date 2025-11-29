@@ -314,7 +314,8 @@ def _create_dashboard_tab_content():
         with dpg.child_window(width=180, height=50, border=False):
             dpg.add_text("Total Forecast", color=(180, 180, 180))
             stat1 = dpg.add_text("--", tag="stat_total_forecast", wrap=170)
-            dpg.bind_item_font(stat1, "stat_font")
+            if dpg.does_item_exist("stat_font"):
+                dpg.bind_item_font(stat1, "stat_font")
             
         with dpg.child_window(width=180, height=50, border=False):
             dpg.add_text("Avg Daily", color=(180, 180, 180))
