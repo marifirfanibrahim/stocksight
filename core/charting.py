@@ -316,7 +316,8 @@ def generate_sku_summary_chart(forecast, grouping='Daily'):
         fig, ax = plt.subplots(figsize=(8, fig_height))
         
         colors = plt.cm.viridis([i / len(totals) for i in range(len(totals))])
-        bars = ax.barh(totals.index, totals.values, color=colors)
+        sku_names = [str(sku) for sku in totals.index.tolist()]
+        bars = ax.barh(sku_names, totals.values, color=colors)
         
         for bar in bars:
             width = bar.get_width()

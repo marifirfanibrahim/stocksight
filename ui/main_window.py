@@ -66,6 +66,25 @@ def _create_controls_tab_content():
                   tag="forecast_granularity_combo", 
                   callback=callbacks.forecast_granularity_callback, width=-1)
     
+    dpg.add_text("Speed:")
+    speed_combo = dpg.add_combo(["Superfast", "Fast", "Balanced", "Accurate"], 
+                                default_value="Fast",
+                                tag="forecast_speed_combo",
+                                callback=callbacks.forecast_speed_callback, width=-1)
+    
+    with dpg.tooltip(speed_combo):
+        dpg.add_text("Superfast:", color=GUIConfig.HEADER_COLOR)
+        dpg.add_text("Quickest. Basic models only.", wrap=220)
+        dpg.add_spacer(height=3)
+        dpg.add_text("Fast:", color=GUIConfig.HEADER_COLOR)
+        dpg.add_text("Good balance of speed and accuracy.", wrap=220)
+        dpg.add_spacer(height=3)
+        dpg.add_text("Balanced:", color=GUIConfig.HEADER_COLOR)
+        dpg.add_text("More models tested. Better results.", wrap=220)
+        dpg.add_spacer(height=3)
+        dpg.add_text("Accurate:", color=GUIConfig.HEADER_COLOR)
+        dpg.add_text("Most thorough. Slowest.", wrap=220)
+    
     dpg.add_spacer(height=10)
     
     # forecast button

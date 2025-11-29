@@ -59,7 +59,6 @@ class AutoTSConfig:
     NUM_VALIDATIONS = 1
     VALIDATION_METHOD = 'backwards'
     MODEL_LIST = 'fast'
-    # MODEL_LIST = ['GluonTS', 'PytorchForecasting'] <-- gpu
     TRANSFORMER_LIST = 'fast'
     N_JOBS = 'auto'
     
@@ -67,26 +66,41 @@ class AutoTSConfig:
     PREDICTION_INTERVAL = 0.95
     SHOW_CONFIDENCE_BANDS = True
     
-    # ---------- ADVANCED SETTINGS ----------
+    # ---------- SPEED PRESETS ----------
+    SUPERFAST_MODE = {
+        'max_generations': 1,
+        'num_validations': 0,
+        'model_list': 'superfast',
+        'transformer_list': 'superfast',
+        'ensemble': None,
+        'models_to_validate': 0.1
+    }
+    
     FAST_MODE = {
         'max_generations': 2,
         'num_validations': 1,
         'model_list': 'fast',
-        'transformer_list': 'fast'
+        'transformer_list': 'fast',
+        'ensemble': 'simple',
+        'models_to_validate': 0.15
     }
     
     BALANCED_MODE = {
         'max_generations': 5,
         'num_validations': 2,
         'model_list': 'default',
-        'transformer_list': 'fast'
+        'transformer_list': 'fast',
+        'ensemble': 'simple',
+        'models_to_validate': 0.25
     }
     
     ACCURATE_MODE = {
         'max_generations': 10,
         'num_validations': 3,
         'model_list': 'all',
-        'transformer_list': 'all'
+        'transformer_list': 'all',
+        'ensemble': 'all',
+        'models_to_validate': 0.35
     }
 
 
@@ -98,7 +112,7 @@ class LargeDataConfig:
     """
     # ---------- THRESHOLDS ----------
     MAX_ROWS = 100000
-    MAX_SKUS = 100  # increased from 30
+    MAX_SKUS = 100
     MAX_SKUS_CHART = 15
     MAX_SKUS_DASHBOARD = 10
     

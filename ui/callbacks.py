@@ -203,10 +203,12 @@ def update_data_preview():
 def safe_load_and_display_image(chart_path, parent_tag, image_tag, texture_tag):
     """
     safely load and display image with error handling
+    properly manages texture memory
     """
     try:
-        safe_delete_item(texture_tag)
+        # cleanup old items
         safe_delete_item(image_tag)
+        safe_delete_item(texture_tag)
         
         if not chart_path or not os.path.exists(chart_path) or not dpg.does_item_exist(parent_tag):
             return False
@@ -229,11 +231,19 @@ def safe_load_and_display_image(chart_path, parent_tag, image_tag, texture_tag):
             print(f"image too large: {width}x{height} = {total_pixels} pixels")
             return False
         
-        with dpg.texture_registry():
-            dpg.add_static_texture(width=width, height=height, default_value=data, tag=texture_tag)
+        # create texture registry once
+        if not dpg.does_item_exist("main_texture_registry"):
+            dpg.add_texture_registry(tag="main_texture_registry", show=False)
+            
+        # add texture and image
+        dpg.add_static_texture(
+            width=width, height=height, default_value=data,
+            tag=texture_tag, parent="main_texture_registry"
+        )
         
         dpg.add_image(texture_tag, parent=parent_tag, tag=image_tag)
         
+        del data
         force_gc()
         return True
         
@@ -1328,3 +1338,7 @@ def show_forecast_diagnostics_callback():
         close_btn = dpg.add_button(label="Close", width=100,
                                    callback=lambda: safe_delete_item("diagnostics_window"))
         dpg.bind_item_theme(close_btn, "danger_button_theme")
+
+
+def forecast_speed_callback(sender, app_data):
+    STATE.forecast_speed = app_data

@@ -264,13 +264,11 @@ def forecast_single_sku(sku_data_dict, forecast_periods, frequency):
                 exog = sku_data_dict['exogenous']
                 used_features = sku_data_dict.get('feature_columns', [])
                 
-                # align exog with pivot index
                 common_idx = df.index.intersection(exog.index)
                 if len(common_idx) >= data_length * 0.5:
                     df = df.loc[common_idx]
                     exog = exog.loc[common_idx]
                     
-                    # create future exog
                     if 'encoder' in sku_data_dict and 'last_exog_values' in sku_data_dict:
                         encoder = sku_data_dict['encoder']
                         last_date = df.index.max()
@@ -299,20 +297,23 @@ def forecast_single_sku(sku_data_dict, forecast_periods, frequency):
                             future_dates
                         )
                 else:
-                    # not enough overlap
                     exog = None
                     used_features = []
             
-            # configure model
+            # get speed config from state
+            speed_config = STATE.get_speed_config()
+            
+            # configure model based on speed
             model = AutoTS(
                 forecast_length=forecast_periods,
                 frequency=frequency,
-                ensemble='simple',
-                max_generations=1,
-                num_validations=0,
+                ensemble=speed_config.get('ensemble'),
+                max_generations=speed_config.get('max_generations', 1),
+                num_validations=speed_config.get('num_validations', 0),
                 validation_method='backwards',
-                model_list='fast_parallel',
-                transformer_list='fast',
+                model_list=speed_config.get('model_list', 'superfast'),
+                transformer_list=speed_config.get('transformer_list', 'superfast'),
+                models_to_validate=speed_config.get('models_to_validate', 0.15),
                 n_jobs=1,
                 min_allowed_train_percent=min_train_pct,
                 no_negatives=True,

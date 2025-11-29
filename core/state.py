@@ -38,13 +38,14 @@ class AppState:
         
         # ---------- FORECAST ----------
         self.forecast_days = AutoTSConfig.DEFAULT_FORECAST_DAYS
+        self.forecast_speed = 'Fast'  # Superfast, Fast, Balanced, Accurate
         self.is_forecasting = False
         self.cancel_forecast = threading.Event()
         self.loaded_model = None
         self.loaded_model_path = None
         
         # ---------- FORECAST RESULTS ----------
-        self.skipped_skus = {}  # sku -> reason
+        self.skipped_skus = {}
         self.successful_skus = []
         
         # ---------- OUTPUT ----------
@@ -70,6 +71,21 @@ class AppState:
         # ---------- DASHBOARD ----------
         self.grouped_forecast = None
         self.error_margins = None
+    
+    def get_speed_config(self):
+        """
+        get autots config based on speed setting
+        """
+        if self.forecast_speed == 'Superfast':
+            return AutoTSConfig.SUPERFAST_MODE
+        elif self.forecast_speed == 'Fast':
+            return AutoTSConfig.FAST_MODE
+        elif self.forecast_speed == 'Balanced':
+            return AutoTSConfig.BALANCED_MODE
+        elif self.forecast_speed == 'Accurate':
+            return AutoTSConfig.ACCURATE_MODE
+        else:
+            return AutoTSConfig.FAST_MODE
     
     def reset_forecast_state(self):
         """
