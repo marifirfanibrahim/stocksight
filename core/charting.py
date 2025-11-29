@@ -56,10 +56,6 @@ def format_y_axis(ax, max_value):
 def format_x_axis_dates(ax, grouping='Daily'):
     """
     format x axis dates based on grouping
-    daily: 12 Jan 2025
-    weekly: 12 Jan 2025
-    monthly: Jan 2025
-    quarterly: Q1 2025
     """
     if grouping == 'Monthly':
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
@@ -71,7 +67,6 @@ def format_x_axis_dates(ax, grouping='Daily'):
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b %Y'))
         ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))
     else:
-        # daily
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b %Y'))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
 
@@ -100,6 +95,36 @@ def get_top_skus(forecast, n):
     return totals.head(n).index.tolist()
 
 
+def remove_overlap(historical, forecast):
+    """
+    remove overlapping dates between historical and forecast
+    forecast should start after historical ends
+    """
+    if historical is None or len(historical) == 0:
+        return historical, forecast
+    
+    if forecast is None or len(forecast) == 0:
+        return historical, forecast
+    
+    # get last historical date
+    hist_end = pd.to_datetime(historical.index.max())
+    
+    # filter forecast to only include dates AFTER historical
+    forecast_dates = pd.to_datetime(forecast.index)
+    forecast_filtered = forecast[forecast_dates > hist_end]
+    
+    if len(forecast_filtered) == 0:
+        print(f"warning: all forecast dates ({forecast.index.min()} to {forecast.index.max()}) overlap with historical (ends {hist_end})")
+        # keep original forecast but show warning
+        return historical, forecast
+    
+    if len(forecast_filtered) < len(forecast):
+        removed_count = len(forecast) - len(forecast_filtered)
+        print(f"removed {removed_count} overlapping forecast dates")
+    
+    return historical, forecast_filtered
+
+
 # ================ CHART GENERATION ================
 
 def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_forecast=None, grouping='Daily', sku_filter=None):
@@ -118,22 +143,18 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
         
         # ---------- APPLY SKU FILTER ----------
         if sku_filter and sku_filter != "All SKUs":
-            # filter forecast
             if sku_filter in forecast.columns:
                 forecast = forecast[[sku_filter]]
             else:
                 print(f"SKU {sku_filter} not found in forecast")
                 return None
             
-            # filter historical if exists
             if sku_filter in historical.columns:
                 historical = historical[[sku_filter]]
             else:
-                # create empty historical for this SKU
                 historical = pd.DataFrame(index=historical.index if len(historical) > 0 else forecast.index[:0])
                 historical[sku_filter] = 0
             
-            # filter confidence bands
             if upper_forecast is not None:
                 if sku_filter in upper_forecast.columns:
                     upper_forecast = upper_forecast[[sku_filter]]
@@ -146,6 +167,14 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
                 else:
                     lower_forecast = None
         
+        # ---------- REMOVE OVERLAPPING DATES ----------
+        historical, forecast = remove_overlap(historical, forecast)
+        
+        if upper_forecast is not None:
+            _, upper_forecast = remove_overlap(historical, upper_forecast)
+        if lower_forecast is not None:
+            _, lower_forecast = remove_overlap(historical, lower_forecast)
+        
         # ---------- APPLY GROUPING ----------
         if grouping != 'Daily':
             if upper_forecast is not None and lower_forecast is not None:
@@ -153,7 +182,6 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
                     forecast, upper_forecast, lower_forecast, grouping
                 )
             else:
-                # handle case where confidence bands don't exist
                 forecast, _, _, _ = group_forecast_by_period(
                     forecast, forecast.copy(), forecast.copy(), grouping
                 )
@@ -182,7 +210,6 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
         fig_height = min(height_per_sku * num_plots, 20)
         fig_width = 10
         
-        # calculate expected pixel height
         dpi = 80
         pixel_height = fig_height * dpi
         
@@ -218,6 +245,22 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
                            label='Forecast', color=ChartConfig.FORECAST_COLOR, 
                            linewidth=1.2, 
                            linestyle='--')
+                    
+                    # ---------- CONNECT HISTORICAL TO FORECAST ----------
+                    if sku in historical.columns and len(historical) > 0:
+                        hist_vals = historical[sku]
+                        if len(hist_vals) > 0 and not hist_vals.isna().all():
+                            last_hist_date = historical.index[-1]
+                            last_hist_val = hist_vals.iloc[-1]
+                            first_fore_date = forecast.index[0]
+                            first_fore_val = fore_vals.iloc[0]
+                            
+                            ax.plot([last_hist_date, first_fore_date], 
+                                   [last_hist_val, first_fore_val],
+                                   color=ChartConfig.FORECAST_COLOR, 
+                                   linewidth=1.0, 
+                                   linestyle=':',
+                                   alpha=0.7)
             
             # confidence interval
             if upper_forecast is not None and lower_forecast is not None:
@@ -315,9 +358,12 @@ def generate_sku_summary_chart(forecast, grouping='Daily'):
         fig_height = max(3, len(totals) * 0.3)
         fig, ax = plt.subplots(figsize=(8, fig_height))
         
-        colors = plt.cm.viridis([i / len(totals) for i in range(len(totals))])
+        # ---------- FIX: Convert index to list of strings ----------
         sku_names = [str(sku) for sku in totals.index.tolist()]
-        bars = ax.barh(sku_names, totals.values, color=colors)
+        values = totals.values
+        
+        colors = plt.cm.viridis([i / len(totals) for i in range(len(totals))])
+        bars = ax.barh(sku_names, values, color=colors)
         
         for bar in bars:
             width = bar.get_width()
@@ -331,13 +377,12 @@ def generate_sku_summary_chart(forecast, grouping='Daily'):
             ax.text(width + totals.max() * 0.01, bar.get_y() + bar.get_height() / 2,
                    label, va='center', fontsize=7)
         
-        format_y_axis(ax, totals.max())
-        
         title = f'Forecast by SKU'
         if limited:
             title += f' (Top {max_bars})'
         ax.set_title(title, fontsize=9)
         ax.set_xlabel('Total Quantity', fontsize=8)
+        ax.set_ylabel('SKU', fontsize=8)
         ax.grid(True, alpha=0.3, axis='x')
         ax.tick_params(axis='both', labelsize=7)
         

@@ -23,7 +23,8 @@ except ImportError:
     class DataConfig:
         DATE_FORMATS = [
             '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y', '%d/%m/%Y',
-            '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%b %d, %Y', '%B %d, %Y'
+            '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%b %d, %Y', '%B %d, %Y',
+            '%b %Y', '%B %Y', '%Y-%m'
         ]
 
 
@@ -103,6 +104,75 @@ def format_dates_output(date_series, original_format):
         return date_series.dt.strftime(original_format)
     except:
         return date_series.astype(str)
+
+
+# ================ WIDE FORMAT DETECTION ================
+
+def detect_data_format(df):
+    """
+    detect if data is wide or long format
+    returns 'wide', 'long', or 'unknown'
+    """
+    columns = df.columns.tolist()
+    
+    # check for standard long format
+    if 'Date' in columns and 'SKU' in columns and 'Quantity' in columns:
+        return 'long'
+    
+    # check for wide format (first column is SKU, rest are dates)
+    if len(columns) > 2:
+        first_col = str(columns[0]).lower()
+        if any(kw in first_col for kw in ['sku', 'product', 'item', 'code', 'name', 'id']):
+            # check if other columns look like dates
+            date_like_count = 0
+            for col in columns[1:]:
+                col_str = str(col).lower()
+                # check for month names or date patterns
+                months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
+                         'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+                if any(m in col_str for m in months):
+                    date_like_count += 1
+                elif any(c.isdigit() for c in col_str):
+                    date_like_count += 1
+            
+            if date_like_count >= len(columns) * 0.5:
+                return 'wide'
+    
+    return 'unknown'
+
+
+def convert_wide_to_long(df):
+    """
+    convert wide format to long format
+    columns = dates, rows = skus -> Date, SKU, Quantity
+    """
+    # first column is SKU identifier
+    sku_col = df.columns[0]
+    date_columns = df.columns[1:].tolist()
+    
+    # melt the dataframe
+    df_long = df.melt(
+        id_vars=[sku_col],
+        value_vars=date_columns,
+        var_name='Date',
+        value_name='Quantity'
+    )
+    
+    # rename SKU column
+    df_long = df_long.rename(columns={sku_col: 'SKU'})
+    
+    # parse dates
+    df_long['Date'] = parse_dates_flexible(df_long['Date'])
+    
+    # ensure quantity is numeric
+    df_long['Quantity'] = pd.to_numeric(df_long['Quantity'], errors='coerce').fillna(0)
+    
+    # sort by date and sku
+    df_long = df_long.sort_values(['Date', 'SKU']).reset_index(drop=True)
+    
+    print(f"converted wide format: {len(df)} rows x {len(date_columns)} periods -> {len(df_long)} records")
+    
+    return df_long
 
 
 # ================ DATA VALIDATION ================

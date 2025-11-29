@@ -466,6 +466,17 @@ def load_file(file_path):
             update_status(f"Unsupported file type: {Path(file_path).suffix}", error=True)
             return
         
+        # ---------- CHECK FOR WIDE FORMAT ----------
+        from utils.preprocessing import detect_data_format, convert_wide_to_long
+        
+        data_format = detect_data_format(df)
+        
+        if data_format == 'wide':
+            update_status("Detected wide format, converting...", warning=True)
+            df = convert_wide_to_long(df)
+            file_info += " (Wide->Long)"
+        
+        # ---------- STANDARD PROCESSING ----------
         if all(col in df.columns for col in ['Date', 'SKU', 'Quantity']):
             mapper.TEMP_DATA.additional_columns = []
             mapper.TEMP_DATA.original_data = df.copy()
@@ -485,32 +496,77 @@ def load_file(file_path):
             update_status(f"Missing library: {e}", error=True)
     except Exception as e:
         update_status(f"Error loading file: {e}", error=True)
+        import traceback
+        traceback.print_exc()
 
 
 def load_excel_sheet(file_path, sheet_name):
+    """
+    load specific sheet from excel file
+    """
     try:
+        print(f"loading excel sheet: {sheet_name} from {file_path}")
+        
         df = pd.read_excel(file_path, sheet_name=sheet_name)
         
+        print(f"loaded dataframe: {df.shape}")
+        print(f"columns: {df.columns.tolist()}")
+        
+        # hide sheet dialog
         safe_configure_item("sheet_dialog", show=False)
         
+        # ---------- CHECK FOR WIDE FORMAT ----------
+        from utils.preprocessing import detect_data_format, convert_wide_to_long
+        
+        data_format = detect_data_format(df)
+        print(f"detected format: {data_format}")
+        
+        if data_format == 'wide':
+            update_status("Detected wide format, converting...", warning=True)
+            df = convert_wide_to_long(df)
+            file_info = f"Excel ({sheet_name}) Wide->Long"
+        else:
+            file_info = f"Excel ({sheet_name})"
+        
+        # ---------- STANDARD PROCESSING ----------
         if all(col in df.columns for col in ['Date', 'SKU', 'Quantity']):
+            print("standard columns found, processing directly")
             mapper.TEMP_DATA.additional_columns = []
             mapper.TEMP_DATA.original_data = df.copy()
-            process_loaded_data(df, file_path, f"Excel ({sheet_name})")
+            process_loaded_data(df, file_path, file_info)
         else:
+            print("showing column mapping dialog")
             mapper.TEMP_DATA.pending_df = df
             mapper.TEMP_DATA.original_data = df.copy()
             mapper.TEMP_DATA.pending_path = file_path
             mapper.show_column_mapping_dialog(df, mapper.suggest_column_mapping(df.columns))
             
     except Exception as e:
+        print(f"excel sheet load error: {e}")
+        import traceback
+        traceback.print_exc()
         update_status(f"Error loading sheet: {e}", error=True)
 
 
 def show_sheet_selection_dialog(file_path, sheet_names):
+    """
+    show dialog to select excel sheet
+    """
+    # store path for later use
     mapper.TEMP_DATA.pending_path = file_path
     
+    # delete existing dialog if any
     safe_delete_item("sheet_dialog")
+    
+    def on_load_sheet():
+        """callback for load button"""
+        selected_sheet = dpg.get_value("sheet_combo")
+        load_excel_sheet(file_path, selected_sheet)
+    
+    def on_cancel():
+        """callback for cancel button"""
+        safe_configure_item("sheet_dialog", show=False)
+        update_status("Loading cancelled", warning=True)
     
     with dpg.window(label="Select Sheet", tag="sheet_dialog", modal=True,
                    width=350, height=200, pos=[525, 300], no_resize=True):
@@ -531,16 +587,13 @@ def show_sheet_selection_dialog(file_path, sheet_names):
         
         with dpg.group(horizontal=True):
             load_btn = dpg.add_button(label="Load Sheet", width=100, height=30,
-                                      callback=lambda: load_excel_sheet(
-                                          mapper.TEMP_DATA.pending_path,
-                                          dpg.get_value("sheet_combo")
-                                      ))
+                                      callback=on_load_sheet)
             safe_bind_theme(load_btn, "forecast_button_theme")
             
             dpg.add_spacer(width=10)
             
             cancel_btn = dpg.add_button(label="Cancel", width=80, height=30,
-                                        callback=lambda: safe_configure_item("sheet_dialog", show=False))
+                                        callback=on_cancel)
             safe_bind_theme(cancel_btn, "danger_button_theme")
 
 
@@ -753,10 +806,15 @@ def forecast_granularity_callback(sender, app_data):
 
 
 def export_model_callback():
+    """
+    export trained model
+    """
     from core.forecasting import last_model
     
     if last_model is None:
-        return update_status("No model to export", error=True)
+        if STATE.forecast_data is not None:
+            return update_status("Parallel mode - model saving not supported", warning=True)
+        return update_status("No model to export. Run forecast first.", error=True)
     
     try:
         output_dir = get_output_directory()
@@ -767,10 +825,12 @@ def export_model_callback():
             pickle.dump(last_model, f)
         
         print(f"model exported: {model_path}")
-        update_status(f"Model exported: {model_path.name}", success=True)
+        update_status(f"Model saved: {model_path.name}", success=True)
         
     except Exception as e:
         print(f"model export error: {e}")
+        import traceback
+        traceback.print_exc()
         update_status(f"Export error: {e}", error=True)
 
 
