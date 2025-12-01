@@ -22,26 +22,16 @@ from core.state import STATE
 from utils.preprocessing import group_forecast_by_period
 
 
-# ================ CONSTANTS ================
-
-MAX_SKUS_PER_PAGE = 8
-MAX_IMAGE_HEIGHT_PIXELS = 3000
-
-
 # ================ HELPER FUNCTIONS ================
 
 def cleanup_matplotlib():
-    """
-    cleanup matplotlib memory
-    """
+    # cleanup matplotlib memory
     plt.close('all')
     gc.collect()
 
 
 def format_y_axis(ax, max_value):
-    """
-    format y axis with proper number formatting
-    """
+    # format y axis with proper number formatting
     def format_func(x, pos):
         if x >= 1000000:
             return f'{x/1000000:.1f}M'
@@ -54,9 +44,7 @@ def format_y_axis(ax, max_value):
 
 
 def format_x_axis_dates(ax, grouping='Daily'):
-    """
-    format x axis dates based on grouping
-    """
+    # format x axis dates based on grouping
     if grouping == 'Monthly':
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
         ax.xaxis.set_major_locator(mdates.MonthLocator())
@@ -72,9 +60,7 @@ def format_x_axis_dates(ax, grouping='Daily'):
 
 
 def group_historical_by_period(historical, period='Weekly'):
-    """
-    group historical data by period
-    """
+    # group historical data by period
     if period == 'Daily':
         return historical
     
@@ -88,18 +74,14 @@ def group_historical_by_period(historical, period='Weekly'):
 
 
 def get_top_skus(forecast, n):
-    """
-    get top n skus by total forecast
-    """
+    # get top n skus by total forecast
     totals = forecast.sum().sort_values(ascending=False)
     return totals.head(n).index.tolist()
 
 
 def remove_overlap(historical, forecast):
-    """
-    remove overlapping dates between historical and forecast
-    forecast should start after historical ends
-    """
+    # remove overlapping dates between historical and forecast
+    # forecast should start after historical ends
     if historical is None or len(historical) == 0:
         return historical, forecast
     
@@ -109,7 +91,7 @@ def remove_overlap(historical, forecast):
     # get last historical date
     hist_end = pd.to_datetime(historical.index.max())
     
-    # filter forecast to only include dates AFTER historical
+    # filter forecast to only include dates after historical
     forecast_dates = pd.to_datetime(forecast.index)
     forecast_filtered = forecast[forecast_dates > hist_end]
     
@@ -128,10 +110,8 @@ def remove_overlap(historical, forecast):
 # ================ CHART GENERATION ================
 
 def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_forecast=None, grouping='Daily', sku_filter=None):
-    """
-    create matplotlib chart with confidence intervals
-    limits skus to prevent memory issues
-    """
+    # create matplotlib chart with confidence intervals
+    # limits skus to prevent memory issues
     try:
         cleanup_matplotlib()
         
@@ -189,7 +169,7 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
         
         # ---------- LIMIT SKUS STRICTLY ----------
         num_skus = len(forecast.columns)
-        max_skus = min(MAX_SKUS_PER_PAGE, LargeDataConfig.MAX_SKUS_CHART)
+        max_skus = min(ChartConfig.MAX_SKUS_PER_PAGE, LargeDataConfig.MAX_SKUS_CHART)
         
         if num_skus > max_skus:
             skus_to_plot = get_top_skus(forecast, max_skus)
@@ -206,15 +186,15 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
             return None
         
         # ---------- CALCULATE FIGURE SIZE ----------
-        height_per_sku = 2.5
-        fig_height = min(height_per_sku * num_plots, 20)
-        fig_width = 10
+        height_per_sku = ChartConfig.FIGURE_HEIGHT_PER_SKU
+        fig_height = min(height_per_sku * num_plots, ChartConfig.MAX_FIGURE_HEIGHT)
+        fig_width = ChartConfig.FIGURE_WIDTH
         
-        dpi = 80
+        dpi = ChartConfig.SAVE_DPI
         pixel_height = fig_height * dpi
         
-        if pixel_height > MAX_IMAGE_HEIGHT_PIXELS:
-            fig_height = MAX_IMAGE_HEIGHT_PIXELS / dpi
+        if pixel_height > ChartConfig.MAX_IMAGE_HEIGHT_PIXELS:
+            fig_height = ChartConfig.MAX_IMAGE_HEIGHT_PIXELS / dpi
         
         # ---------- SETUP FIGURE ----------
         fig, axes = plt.subplots(num_plots, 1, figsize=(fig_width, fig_height))
@@ -234,17 +214,22 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
                     max_val = max(max_val, hist_vals.max())
                     ax.plot(historical.index, hist_vals, 
                            label='Historical', color=ChartConfig.HISTORICAL_COLOR, 
-                           linewidth=1.2)
+                           linewidth=ChartConfig.LINE_WIDTH)
             
             # forecast
+            first_forecast_val = 0
+            error_margin = 0
+            
             if sku in forecast.columns:
                 fore_vals = forecast[sku]
                 if len(fore_vals) > 0 and not fore_vals.isna().all():
                     max_val = max(max_val, fore_vals.max())
+                    first_forecast_val = fore_vals.iloc[0]
+                    
                     ax.plot(forecast.index, fore_vals, 
                            label='Forecast', color=ChartConfig.FORECAST_COLOR, 
-                           linewidth=1.2, 
-                           linestyle='--')
+                           linewidth=ChartConfig.LINE_WIDTH, 
+                           linestyle=ChartConfig.FORECAST_STYLE)
                     
                     # ---------- CONNECT HISTORICAL TO FORECAST ----------
                     if sku in historical.columns and len(historical) > 0:
@@ -263,21 +248,32 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
                                    alpha=0.7)
             
             # confidence interval
-            if upper_forecast is not None and lower_forecast is not None:
-                if sku in upper_forecast.columns and sku in lower_forecast.columns:
-                    upper_vals = upper_forecast[sku]
-                    lower_vals = lower_forecast[sku]
-                    if not upper_vals.isna().all():
-                        max_val = max(max_val, upper_vals.max())
-                        ax.fill_between(
-                            forecast.index,
-                            lower_vals,
-                            upper_vals,
-                            color=ChartConfig.CONFIDENCE_COLOR,
-                            alpha=ChartConfig.CONFIDENCE_ALPHA,
-                            label='95% CI'
-                        )
-            
+            if upper_forecast is not None and lower_forecast is not None and sku in upper_forecast.columns and sku in lower_forecast.columns:
+                upper_vals = upper_forecast[sku]
+                lower_vals = lower_forecast[sku]
+                if not upper_vals.isna().all():
+                    max_val = max(max_val, upper_vals.max())
+                    error_margin = (upper_vals.sum() - lower_vals.sum()) / 2
+                    
+                    ax.fill_between(
+                        forecast.index,
+                        lower_vals,
+                        upper_vals,
+                        color=ChartConfig.CONFIDENCE_COLOR,
+                        alpha=ChartConfig.CONFIDENCE_ALPHA,
+                        label='95% CI'
+                    )
+            elif sku in forecast.columns:
+                # if no ci data create zero-width band
+                ax.fill_between(
+                    forecast.index,
+                    forecast[sku],
+                    forecast[sku],
+                    color=ChartConfig.CONFIDENCE_COLOR,
+                    alpha=ChartConfig.CONFIDENCE_ALPHA,
+                    label='95% CI'
+                )
+
             # format axes
             if max_val > 0:
                 format_y_axis(ax, max_val)
@@ -285,11 +281,28 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
             format_x_axis_dates(ax, grouping)
             
             # compact styling
-            ax.set_title(f'{sku}', fontsize=8, pad=2)
+            title_text = f'{sku}'
+            if first_forecast_val > 0:
+                if first_forecast_val >= 1000000:
+                    title_text += f' | Forecast: {first_forecast_val/1000000:.2f}M'
+                elif first_forecast_val >= 1000:
+                    title_text += f' | Forecast: {first_forecast_val/1000:.2f}K'
+                else:
+                    title_text += f' | Forecast: {first_forecast_val:,.0f}'
+            
+            if error_margin > 0:
+                if error_margin >= 1000000:
+                    title_text += f' | Error: ±{error_margin/1000000:.2f}M'
+                elif error_margin >= 1000:
+                    title_text += f' | Error: ±{error_margin/1000:.2f}K'
+                else:
+                    title_text += f' | Error: ±{error_margin:,.0f}'
+            
+            ax.set_title(title_text, fontsize=8, pad=2)
             ax.set_xlabel('')
             ax.set_ylabel('Qty', fontsize=7)
             ax.legend(loc='upper left', fontsize=6, framealpha=0.7)
-            ax.grid(True, alpha=0.3)
+            ax.grid(True, alpha=ChartConfig.GRID_ALPHA)
             ax.tick_params(axis='both', labelsize=6)
             
             plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=6)
@@ -332,9 +345,7 @@ def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_for
 
 
 def generate_sku_summary_chart(forecast, grouping='Daily'):
-    """
-    create bar chart summary
-    """
+    # create bar chart summary
     try:
         cleanup_matplotlib()
         
@@ -358,7 +369,7 @@ def generate_sku_summary_chart(forecast, grouping='Daily'):
         fig_height = max(3, len(totals) * 0.3)
         fig, ax = plt.subplots(figsize=(8, fig_height))
         
-        # ---------- FIX: Convert index to list of strings ----------
+        # convert index to list of strings
         sku_names = [str(sku) for sku in totals.index.tolist()]
         values = totals.values
         
@@ -406,9 +417,7 @@ def generate_sku_summary_chart(forecast, grouping='Daily'):
 
 
 def generate_seasonality_chart(seasonality_info, output_path=None):
-    """
-    create seasonality visualization
-    """
+    # create seasonality visualization
     try:
         cleanup_matplotlib()
         

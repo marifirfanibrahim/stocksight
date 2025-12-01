@@ -105,22 +105,50 @@ def clear_all_data():
     clear all loaded data
     reset to initial state
     """
+    # ---------- DATA ----------
     STATE.raw_data = None
     STATE.clean_data = None
     STATE.forecast_data = None
     STATE.upper_forecast = None
     STATE.lower_forecast = None
     STATE.sku_list = []
+    
+    # ---------- FEATURES ----------
     STATE.feature_columns = []
     STATE.selected_features = []
     STATE.exog_data = None
     STATE.encoders = None
     STATE.seasonality_info = {}
+    
+    # ---------- SCENARIOS ----------
     STATE.scenario_history = []
+    STATE.original_forecast = None
+    STATE.original_upper = None
+    STATE.original_lower = None
+    
+    # ---------- COLUMN MAPPING ----------
+    STATE.additional_columns = []
+    STATE.column_mapping = {}
+    
+    # ---------- DATE FORMAT ----------
     STATE.original_date_format = None
     STATE.detected_date_format = '%Y-%m-%d'
+    
+    # ---------- DASHBOARD ----------
     STATE.grouped_forecast = None
     STATE.error_margins = None
+    
+    # ---------- OUTPUT ----------
+    STATE.custom_output_dir = None
+    
+    # ---------- MODEL ----------
+    STATE.loaded_model = None
+    STATE.loaded_model_path = None
+    
+    # ---------- FORECAST TRACKING ----------
+    STATE.skipped_skus = {}
+    STATE.successful_skus = []
+    STATE.sku_feature_map = {}
     
     print("all data cleared")
 

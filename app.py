@@ -1,5 +1,5 @@
 """
-inventory forecasting application
+stocksight inventory forecasting application
 main entry point with crash logging
 """
 
@@ -38,36 +38,36 @@ def write_log(message):
         f.write("\n")
 
 
-# ================ MAIN ENTRY ================
+# ================ MAIN ================
 
 def main():
     """
     application entry point
-    initialize and run gui
     """
     try:
-        write_log("Starting application...")
+        write_log("Starting Stocksight...")
         
+        # Setup directories
         write_log("Importing config...")
         from config import Paths
         
-        write_log("Importing dearpygui...")
-        import dearpygui.dearpygui as dpg
-        
-        write_log("Importing ui...")
-        from ui.main_window import create_gui
-        
-        write_log("Creating directories...")
         os.makedirs(Paths.DATA_DIR, exist_ok=True)
         os.makedirs(Paths.OUTPUT_DIR, exist_ok=True)
         os.makedirs(Paths.USER_OUTPUT, exist_ok=True)
         
-        write_log("Starting GUI...")
-        print("starting stocksight inventory forecast")
+        write_log("Importing tkinter...")
+        import tkinter as tk
         
-        create_gui()
+        write_log("Importing main window...")
+        from ui.main_window import StocksightApp
         
-        print("application closed")
+        write_log("Creating application...")
+        root = tk.Tk()
+        app = StocksightApp(root)
+        
+        write_log("Starting main loop...")
+        root.mainloop()
+        
         write_log("Application closed normally")
         
     except Exception as e:
@@ -75,15 +75,15 @@ def main():
         write_log(error_msg)
         print(f"FATAL ERROR: {e}")
         
-        # show message box on windows
+        # Show error dialog
         try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"Application crashed:\n\n{str(e)[:500]}\n\nSee crash_log.txt for details",
-                "Stocksight Error",
-                0x10
-            )
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Stocksight Error", 
+                                f"Application crashed:\n\n{str(e)[:500]}\n\nSee crash_log.txt")
+            root.destroy()
         except:
             pass
         

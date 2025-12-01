@@ -167,11 +167,17 @@ class ChartConfig:
     matplotlib chart settings
     """
     # ---------- FIGURE SIZE ----------
-    FIGURE_WIDTH = 12
-    FIGURE_HEIGHT_PER_SKU = 3
+    FIGURE_WIDTH = 10
+    FIGURE_HEIGHT_PER_SKU = 2.5
+    MAX_FIGURE_HEIGHT = 20
     
     # ---------- DPI ----------
-    SAVE_DPI = 100
+    SAVE_DPI = 80
+    DISPLAY_DPI = 80
+    MAX_IMAGE_HEIGHT_PIXELS = 3000
+    
+    # ---------- LAYOUT ----------
+    MAX_SKUS_PER_PAGE = 8
     
     # ---------- COLORS ----------
     HISTORICAL_COLOR = 'blue'
@@ -285,6 +291,17 @@ class LogConfig:
     # ---------- FILE SETTINGS ----------
     MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 mb
     BACKUP_COUNT = 3
+
+
+# ================ DISPLAY SETTINGS ================
+
+class DisplayConfig:
+    """
+    settings for ui display formats
+    """
+    # ---------- DATE FORMAT ----------
+    # https://strftime.org/
+    DATE_FORMAT = '%d %b %Y'
 
 
 # ================ INITIALIZATION ================

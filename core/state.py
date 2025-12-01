@@ -3,7 +3,6 @@ application state management
 global state object
 """
 
-
 # ================ IMPORTS ================
 
 import threading
@@ -13,10 +12,8 @@ from config import AutoTSConfig
 # ================ GLOBAL STATE ================
 
 class AppState:
-    """
-    store application state
-    hold dataframes and settings
-    """
+    # store application state
+    # hold dataframes and settings
     def __init__(self):
         # ---------- DATA ----------
         self.raw_data = None
@@ -32,17 +29,23 @@ class AppState:
         
         # ---------- DATE FORMAT ----------
         self.detected_date_format = '%Y-%m-%d'
-        self.original_date_format = None
-        self.date_grouping = 'Daily'
-        self.forecast_granularity = 'Daily'
+        
+        # ---------- VISUALIZATION ----------
+        self.chart_grouping = 'Daily'
         
         # ---------- FORECAST ----------
         self.forecast_days = AutoTSConfig.DEFAULT_FORECAST_DAYS
-        self.forecast_speed = 'Fast'  # Superfast, Fast, Balanced, Accurate
+        self.forecast_granularity = 'Daily'
+        self.forecast_speed = 'Fast'
         self.is_forecasting = False
         self.cancel_forecast = threading.Event()
+        
+        # ---------- MODEL STORAGE ----------
         self.loaded_model = None
         self.loaded_model_path = None
+        self.saved_models = {}
+        self.last_trained_model = None
+        self.has_loaded_models = False
         
         # ---------- FORECAST RESULTS ----------
         self.skipped_skus = {}
@@ -73,9 +76,7 @@ class AppState:
         self.error_margins = None
     
     def get_speed_config(self):
-        """
-        get autots config based on speed setting
-        """
+        # get autots config based on speed setting
         if self.forecast_speed == 'Superfast':
             return AutoTSConfig.SUPERFAST_MODE
         elif self.forecast_speed == 'Fast':
@@ -88,9 +89,7 @@ class AppState:
             return AutoTSConfig.FAST_MODE
     
     def reset_forecast_state(self):
-        """
-        reset forecast related state
-        """
+        # reset forecast related state
         self.forecast_data = None
         self.upper_forecast = None
         self.lower_forecast = None
@@ -102,23 +101,28 @@ class AppState:
         self.original_lower = None
         self.skipped_skus = {}
         self.successful_skus = []
+        # dont clear saved_models if they were loaded
+        if not self.has_loaded_models:
+            self.saved_models = {}
     
+    def clear_model_state(self):
+        # surgically clear only the loaded model state
+        self.loaded_model = None
+        self.loaded_model_path = None
+        self.saved_models = {}
+        self.has_loaded_models = False
+        print("loaded model state cleared")
+
     def reset_cancel_flag(self):
-        """
-        reset cancellation flag
-        """
+        # reset cancellation flag
         self.cancel_forecast.clear()
     
     def request_cancel(self):
-        """
-        request forecast cancellation
-        """
+        # request forecast cancellation
         self.cancel_forecast.set()
     
     def is_cancelled(self):
-        """
-        check if cancellation requested
-        """
+        # check if cancellation requested
         return self.cancel_forecast.is_set()
 
 
