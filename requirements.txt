@@ -1,5 +1,6 @@
-dearpygui>=1.11.1
-autots>=0.6.10
-pandas>=2.0.0
-matplotlib>=3.7.0
-numpy>=1.24.0
+PyQt6
+PyQt6-WebEngine
+ydata-profiling
+autoviz
+tsfresh
+featuretools

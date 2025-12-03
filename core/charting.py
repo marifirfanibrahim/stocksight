@@ -1,6 +1,6 @@
 """
-chart generation functions
-matplotlib visualizations
+chart generation for pyqt embedding
+matplotlib visualizations with base64 output
 """
 
 
@@ -13,25 +13,57 @@ import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
 import pandas as pd
 import numpy as np
-import os
+import io
+import base64
 import gc
+from pathlib import Path
+from typing import Optional, Dict, List, Tuple
 
-from config import ChartConfig, LargeDataConfig
-from core.data_operations import get_output_directory
+from config import ChartConfig, Paths
 from core.state import STATE
-from utils.preprocessing import group_forecast_by_period
+from core.data_operations import get_output_directory
 
 
-# ================ HELPER FUNCTIONS ================
+# ================ CLEANUP ================
 
 def cleanup_matplotlib():
-    # cleanup matplotlib memory
+    """
+    cleanup matplotlib memory
+    """
     plt.close('all')
     gc.collect()
 
 
-def format_y_axis(ax, max_value):
-    # format y axis with proper number formatting
+# ================ THEME ================
+
+def apply_chart_theme(fig, ax, dark_mode: bool = True):
+    """
+    apply theme to chart
+    """
+    if dark_mode:
+        theme = ChartConfig.DARK_THEME
+    else:
+        theme = ChartConfig.LIGHT_THEME
+    
+    fig.patch.set_facecolor(theme['background'])
+    ax.set_facecolor(theme['background'])
+    ax.tick_params(colors=theme['text'])
+    ax.xaxis.label.set_color(theme['text'])
+    ax.yaxis.label.set_color(theme['text'])
+    ax.title.set_color(theme['text'])
+    
+    for spine in ax.spines.values():
+        spine.set_color(theme['grid'])
+    
+    ax.grid(True, alpha=0.3, color=theme['grid'])
+
+
+# ================ FORMATTERS ================
+
+def format_y_axis(ax, max_value: float):
+    """
+    format y axis with proper number formatting
+    """
     def format_func(x, pos):
         if x >= 1000000:
             return f'{x/1000000:.1f}M'
@@ -43,339 +75,228 @@ def format_y_axis(ax, max_value):
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(format_func))
 
 
-def format_x_axis_dates(ax, grouping='Daily'):
-    # format x axis dates based on grouping
+def format_x_axis_dates(ax, grouping: str = 'Daily'):
+    """
+    format x axis dates based on grouping
+    """
     if grouping == 'Monthly':
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
         ax.xaxis.set_major_locator(mdates.MonthLocator())
     elif grouping == 'Quarterly':
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('Q%q %Y'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
         ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
     elif grouping == 'Weekly':
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b %Y'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b'))
         ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))
     else:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b %Y'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b'))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
 
 
-def group_historical_by_period(historical, period='Weekly'):
-    # group historical data by period
-    if period == 'Daily':
-        return historical
-    
-    hist_copy = historical.copy()
-    hist_copy.index = pd.to_datetime(hist_copy.index)
-    
-    freq_map = {'Weekly': 'W', 'Monthly': 'MS', 'Quarterly': 'QS'}
-    freq = freq_map.get(period, 'D')
-    
-    return hist_copy.resample(freq).sum()
+# ================ CHART TO BASE64 ================
+
+def fig_to_base64(fig) -> str:
+    """
+    convert matplotlib figure to base64 string
+    """
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=ChartConfig.DISPLAY_DPI, bbox_inches='tight',
+                facecolor=fig.get_facecolor(), edgecolor='none')
+    buf.seek(0)
+    img_str = base64.b64encode(buf.read()).decode()
+    buf.close()
+    return img_str
 
 
-def get_top_skus(forecast, n):
-    # get top n skus by total forecast
-    totals = forecast.sum().sort_values(ascending=False)
-    return totals.head(n).index.tolist()
+def fig_to_bytes(fig) -> bytes:
+    """
+    convert matplotlib figure to bytes
+    """
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=ChartConfig.DISPLAY_DPI, bbox_inches='tight',
+                facecolor=fig.get_facecolor(), edgecolor='none')
+    buf.seek(0)
+    return buf.read()
 
 
-def remove_overlap(historical, forecast):
-    # remove overlapping dates between historical and forecast
-    # forecast should start after historical ends
-    if historical is None or len(historical) == 0:
-        return historical, forecast
-    
-    if forecast is None or len(forecast) == 0:
-        return historical, forecast
-    
-    # get last historical date
-    hist_end = pd.to_datetime(historical.index.max())
-    
-    # filter forecast to only include dates after historical
-    forecast_dates = pd.to_datetime(forecast.index)
-    forecast_filtered = forecast[forecast_dates > hist_end]
-    
-    if len(forecast_filtered) == 0:
-        print(f"warning: all forecast dates ({forecast.index.min()} to {forecast.index.max()}) overlap with historical (ends {hist_end})")
-        # keep original forecast but show warning
-        return historical, forecast
-    
-    if len(forecast_filtered) < len(forecast):
-        removed_count = len(forecast) - len(forecast_filtered)
-        print(f"removed {removed_count} overlapping forecast dates")
-    
-    return historical, forecast_filtered
+# ================ FORECAST CHART ================
 
-
-# ================ CHART GENERATION ================
-
-def generate_forecast_chart(historical, forecast, upper_forecast=None, lower_forecast=None, grouping='Daily', sku_filter=None):
-    # create matplotlib chart with confidence intervals
-    # limits skus to prevent memory issues
+def generate_forecast_chart(
+    historical: pd.DataFrame,
+    forecast: pd.DataFrame,
+    upper_forecast: pd.DataFrame = None,
+    lower_forecast: pd.DataFrame = None,
+    grouping: str = 'Daily',
+    sku_filter: str = None,
+    dark_mode: bool = True,
+    save_to_file: bool = True
+) -> Tuple[Optional[str], Optional[Path]]:
+    """
+    create forecast chart
+    returns base64 string and file path
+    """
     try:
         cleanup_matplotlib()
         
-        # ---------- COPY DATA TO AVOID MODIFICATION ----------
+        # copy data
         forecast = forecast.copy()
         historical = historical.copy() if historical is not None else pd.DataFrame()
-        upper_forecast = upper_forecast.copy() if upper_forecast is not None else None
-        lower_forecast = lower_forecast.copy() if lower_forecast is not None else None
+        upper = upper_forecast.copy() if upper_forecast is not None else None
+        lower = lower_forecast.copy() if lower_forecast is not None else None
         
-        # ---------- APPLY SKU FILTER ----------
+        # apply sku filter
         if sku_filter and sku_filter != "All SKUs":
             if sku_filter in forecast.columns:
                 forecast = forecast[[sku_filter]]
-            else:
-                print(f"SKU {sku_filter} not found in forecast")
-                return None
-            
-            if sku_filter in historical.columns:
-                historical = historical[[sku_filter]]
-            else:
-                historical = pd.DataFrame(index=historical.index if len(historical) > 0 else forecast.index[:0])
-                historical[sku_filter] = 0
-            
-            if upper_forecast is not None:
-                if sku_filter in upper_forecast.columns:
-                    upper_forecast = upper_forecast[[sku_filter]]
-                else:
-                    upper_forecast = None
-                    
-            if lower_forecast is not None:
-                if sku_filter in lower_forecast.columns:
-                    lower_forecast = lower_forecast[[sku_filter]]
-                else:
-                    lower_forecast = None
+                if sku_filter in historical.columns:
+                    historical = historical[[sku_filter]]
+                if upper is not None and sku_filter in upper.columns:
+                    upper = upper[[sku_filter]]
+                if lower is not None and sku_filter in lower.columns:
+                    lower = lower[[sku_filter]]
         
-        # ---------- REMOVE OVERLAPPING DATES ----------
-        historical, forecast = remove_overlap(historical, forecast)
+        # limit skus
+        max_skus = 10
+        if len(forecast.columns) > max_skus:
+            totals = forecast.sum().sort_values(ascending=False)
+            top_skus = totals.head(max_skus).index.tolist()
+            forecast = forecast[top_skus]
+            if len(historical.columns) > 0:
+                historical = historical[[c for c in top_skus if c in historical.columns]]
+            if upper is not None:
+                upper = upper[[c for c in top_skus if c in upper.columns]]
+            if lower is not None:
+                lower = lower[[c for c in top_skus if c in lower.columns]]
         
-        if upper_forecast is not None:
-            _, upper_forecast = remove_overlap(historical, upper_forecast)
-        if lower_forecast is not None:
-            _, lower_forecast = remove_overlap(historical, lower_forecast)
-        
-        # ---------- APPLY GROUPING ----------
-        if grouping != 'Daily':
-            if upper_forecast is not None and lower_forecast is not None:
-                forecast, upper_forecast, lower_forecast, _ = group_forecast_by_period(
-                    forecast, upper_forecast, lower_forecast, grouping
-                )
-            else:
-                forecast, _, _, _ = group_forecast_by_period(
-                    forecast, forecast.copy(), forecast.copy(), grouping
-                )
-            historical = group_historical_by_period(historical, grouping)
-        
-        # ---------- LIMIT SKUS STRICTLY ----------
-        num_skus = len(forecast.columns)
-        max_skus = min(ChartConfig.MAX_SKUS_PER_PAGE, LargeDataConfig.MAX_SKUS_CHART)
-        
-        if num_skus > max_skus:
-            skus_to_plot = get_top_skus(forecast, max_skus)
-            skus_limited = True
-            print(f"chart: showing top {max_skus} of {num_skus} skus")
-        else:
-            skus_to_plot = forecast.columns.tolist()
-            skus_limited = False
-        
-        num_plots = len(skus_to_plot)
-        
+        num_plots = len(forecast.columns)
         if num_plots == 0:
-            print("no skus to plot")
-            return None
+            return None, None
         
-        # ---------- CALCULATE FIGURE SIZE ----------
+        # calculate figure size
         height_per_sku = ChartConfig.FIGURE_HEIGHT_PER_SKU
         fig_height = min(height_per_sku * num_plots, ChartConfig.MAX_FIGURE_HEIGHT)
         fig_width = ChartConfig.FIGURE_WIDTH
         
-        dpi = ChartConfig.SAVE_DPI
-        pixel_height = fig_height * dpi
-        
-        if pixel_height > ChartConfig.MAX_IMAGE_HEIGHT_PIXELS:
-            fig_height = ChartConfig.MAX_IMAGE_HEIGHT_PIXELS / dpi
-        
-        # ---------- SETUP FIGURE ----------
+        # create figure
         fig, axes = plt.subplots(num_plots, 1, figsize=(fig_width, fig_height))
         
         if num_plots == 1:
             axes = [axes]
         
-        # ---------- PLOT EACH SKU ----------
-        for idx, sku in enumerate(skus_to_plot):
+        # plot each sku
+        for idx, sku in enumerate(forecast.columns):
             ax = axes[idx]
+            apply_chart_theme(fig, ax, dark_mode)
+            
             max_val = 0
             
             # historical
             if sku in historical.columns:
-                hist_vals = historical[sku]
-                if len(hist_vals) > 0 and not hist_vals.isna().all():
+                hist_vals = historical[sku].dropna()
+                if len(hist_vals) > 0:
                     max_val = max(max_val, hist_vals.max())
-                    ax.plot(historical.index, hist_vals, 
-                           label='Historical', color=ChartConfig.HISTORICAL_COLOR, 
-                           linewidth=ChartConfig.LINE_WIDTH)
+                    ax.plot(
+                        historical.index, historical[sku],
+                        label='Historical',
+                        color=ChartConfig.HISTORICAL_COLOR,
+                        linewidth=1.5
+                    )
             
             # forecast
-            first_forecast_val = 0
-            error_margin = 0
-            
-            if sku in forecast.columns:
-                fore_vals = forecast[sku]
-                if len(fore_vals) > 0 and not fore_vals.isna().all():
-                    max_val = max(max_val, fore_vals.max())
-                    first_forecast_val = fore_vals.iloc[0]
-                    
-                    ax.plot(forecast.index, fore_vals, 
-                           label='Forecast', color=ChartConfig.FORECAST_COLOR, 
-                           linewidth=ChartConfig.LINE_WIDTH, 
-                           linestyle=ChartConfig.FORECAST_STYLE)
-                    
-                    # ---------- CONNECT HISTORICAL TO FORECAST ----------
-                    if sku in historical.columns and len(historical) > 0:
-                        hist_vals = historical[sku]
-                        if len(hist_vals) > 0 and not hist_vals.isna().all():
-                            last_hist_date = historical.index[-1]
-                            last_hist_val = hist_vals.iloc[-1]
-                            first_fore_date = forecast.index[0]
-                            first_fore_val = fore_vals.iloc[0]
-                            
-                            ax.plot([last_hist_date, first_fore_date], 
-                                   [last_hist_val, first_fore_val],
-                                   color=ChartConfig.FORECAST_COLOR, 
-                                   linewidth=1.0, 
-                                   linestyle=':',
-                                   alpha=0.7)
+            fore_vals = forecast[sku].dropna()
+            if len(fore_vals) > 0:
+                max_val = max(max_val, fore_vals.max())
+                ax.plot(
+                    forecast.index, forecast[sku],
+                    label='Forecast',
+                    color=ChartConfig.FORECAST_COLOR,
+                    linewidth=1.5,
+                    linestyle='--'
+                )
             
             # confidence interval
-            if upper_forecast is not None and lower_forecast is not None and sku in upper_forecast.columns and sku in lower_forecast.columns:
-                upper_vals = upper_forecast[sku]
-                lower_vals = lower_forecast[sku]
-                if not upper_vals.isna().all():
-                    max_val = max(max_val, upper_vals.max())
-                    error_margin = (upper_vals.sum() - lower_vals.sum()) / 2
-                    
+            if upper is not None and lower is not None:
+                if sku in upper.columns and sku in lower.columns:
                     ax.fill_between(
                         forecast.index,
-                        lower_vals,
-                        upper_vals,
+                        lower[sku],
+                        upper[sku],
                         color=ChartConfig.CONFIDENCE_COLOR,
                         alpha=ChartConfig.CONFIDENCE_ALPHA,
                         label='95% CI'
                     )
-            elif sku in forecast.columns:
-                # if no ci data create zero-width band
-                ax.fill_between(
-                    forecast.index,
-                    forecast[sku],
-                    forecast[sku],
-                    color=ChartConfig.CONFIDENCE_COLOR,
-                    alpha=ChartConfig.CONFIDENCE_ALPHA,
-                    label='95% CI'
-                )
-
-            # format axes
+            
+            # formatting
             if max_val > 0:
                 format_y_axis(ax, max_val)
             
             format_x_axis_dates(ax, grouping)
             
-            # compact styling
-            title_text = f'{sku}'
-            if first_forecast_val > 0:
-                if first_forecast_val >= 1000000:
-                    title_text += f' | Forecast: {first_forecast_val/1000000:.2f}M'
-                elif first_forecast_val >= 1000:
-                    title_text += f' | Forecast: {first_forecast_val/1000:.2f}K'
-                else:
-                    title_text += f' | Forecast: {first_forecast_val:,.0f}'
+            ax.set_title(sku, fontsize=10, pad=5)
+            ax.set_ylabel('Qty', fontsize=9)
+            ax.legend(loc='upper left', fontsize=8, framealpha=0.7)
             
-            if error_margin > 0:
-                if error_margin >= 1000000:
-                    title_text += f' | Error: ±{error_margin/1000000:.2f}M'
-                elif error_margin >= 1000:
-                    title_text += f' | Error: ±{error_margin/1000:.2f}K'
-                else:
-                    title_text += f' | Error: ±{error_margin:,.0f}'
-            
-            ax.set_title(title_text, fontsize=8, pad=2)
-            ax.set_xlabel('')
-            ax.set_ylabel('Qty', fontsize=7)
-            ax.legend(loc='upper left', fontsize=6, framealpha=0.7)
-            ax.grid(True, alpha=ChartConfig.GRID_ALPHA)
-            ax.tick_params(axis='both', labelsize=6)
-            
-            plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=6)
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8)
         
-        # ---------- ADD INFO TEXT ----------
-        info_parts = []
-        if grouping != 'Daily':
-            info_parts.append(grouping)
-        if skus_limited:
-            info_parts.append(f"Top {max_skus} of {num_skus} SKUs")
-        if sku_filter and sku_filter != "All SKUs":
-            info_parts.append(f"Filter: {sku_filter}")
-        
-        if info_parts:
-            fig.text(0.5, 0.01, ' | '.join(info_parts), 
-                    ha='center', fontsize=7, color='gray')
-            plt.subplots_adjust(bottom=0.05)
-        
-        # ---------- SAVE CHART ----------
         plt.tight_layout()
         
-        output_dir = get_output_directory()
-        os.makedirs(output_dir, exist_ok=True)
+        # convert to base64
+        img_base64 = fig_to_base64(fig)
         
-        output_path = output_dir / "forecast.png"
-        plt.savefig(str(output_path), dpi=dpi, bbox_inches='tight', 
-                   facecolor='white', edgecolor='none')
+        # save to file
+        file_path = None
+        if save_to_file:
+            output_dir = get_output_directory()
+            output_dir.mkdir(parents=True, exist_ok=True)
+            file_path = output_dir / "forecast.png"
+            fig.savefig(str(file_path), dpi=ChartConfig.SAVE_DPI, bbox_inches='tight',
+                        facecolor=fig.get_facecolor(), edgecolor='none')
         
         cleanup_matplotlib()
         
-        print(f"chart saved: {output_path}")
-        return output_path
+        return img_base64, file_path
         
     except Exception as e:
         print(f"chart error: {e}")
         import traceback
         traceback.print_exc()
         cleanup_matplotlib()
-        raise
+        return None, None
 
 
-def generate_sku_summary_chart(forecast, grouping='Daily'):
-    # create bar chart summary
+# ================ SUMMARY CHART ================
+
+def generate_summary_chart(
+    forecast: pd.DataFrame,
+    grouping: str = 'Daily',
+    dark_mode: bool = True
+) -> Tuple[Optional[str], Optional[Path]]:
+    """
+    create bar chart summary
+    """
     try:
         cleanup_matplotlib()
         
-        if grouping != 'Daily':
-            forecast_grouped, _, _, _ = group_forecast_by_period(
-                forecast, forecast, forecast, grouping
-            )
-        else:
-            forecast_grouped = forecast
+        totals = forecast.sum().sort_values(ascending=True)
         
-        totals = forecast_grouped.sum().sort_values(ascending=True)
-        
-        # limit to top 15
+        # limit
         max_bars = 15
         if len(totals) > max_bars:
             totals = totals.tail(max_bars)
-            limited = True
-        else:
-            limited = False
         
-        fig_height = max(3, len(totals) * 0.3)
-        fig, ax = plt.subplots(figsize=(8, fig_height))
+        fig_height = max(4, len(totals) * 0.4)
+        fig, ax = plt.subplots(figsize=(10, fig_height))
         
-        # convert index to list of strings
-        sku_names = [str(sku) for sku in totals.index.tolist()]
-        values = totals.values
+        apply_chart_theme(fig, ax, dark_mode)
         
+        # create bars
         colors = plt.cm.viridis([i / len(totals) for i in range(len(totals))])
-        bars = ax.barh(sku_names, values, color=colors)
+        bars = ax.barh(range(len(totals)), totals.values, color=colors)
         
+        ax.set_yticks(range(len(totals)))
+        ax.set_yticklabels([str(s) for s in totals.index])
+        
+        # add value labels
         for bar in bars:
             width = bar.get_width()
             if width >= 1000000:
@@ -386,111 +307,266 @@ def generate_sku_summary_chart(forecast, grouping='Daily'):
                 label = f'{width:,.0f}'
             
             ax.text(width + totals.max() * 0.01, bar.get_y() + bar.get_height() / 2,
-                   label, va='center', fontsize=7)
+                    label, va='center', fontsize=8,
+                    color=ChartConfig.DARK_THEME['text'] if dark_mode else ChartConfig.LIGHT_THEME['text'])
         
-        title = f'Forecast by SKU'
-        if limited:
-            title += f' (Top {max_bars})'
-        ax.set_title(title, fontsize=9)
-        ax.set_xlabel('Total Quantity', fontsize=8)
-        ax.set_ylabel('SKU', fontsize=8)
-        ax.grid(True, alpha=0.3, axis='x')
-        ax.tick_params(axis='both', labelsize=7)
+        ax.set_title('Total Forecast by SKU', fontsize=12)
+        ax.set_xlabel('Total Quantity', fontsize=10)
         
         plt.tight_layout()
         
-        output_dir = get_output_directory()
-        os.makedirs(output_dir, exist_ok=True)
+        img_base64 = fig_to_base64(fig)
         
-        output_path = output_dir / "sku_summary.png"
-        plt.savefig(str(output_path), dpi=80, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
+        output_dir = get_output_directory()
+        file_path = output_dir / "summary.png"
+        fig.savefig(str(file_path), dpi=ChartConfig.SAVE_DPI, bbox_inches='tight',
+                    facecolor=fig.get_facecolor(), edgecolor='none')
         
         cleanup_matplotlib()
         
-        return output_path
+        return img_base64, file_path
         
     except Exception as e:
-        print(f"summary error: {e}")
+        print(f"summary chart error: {e}")
         cleanup_matplotlib()
-        raise
+        return None, None
 
 
-def generate_seasonality_chart(seasonality_info, output_path=None):
-    # create seasonality visualization
+# ================ TIME SERIES CHART ================
+
+def generate_time_series_chart(
+    df: pd.DataFrame,
+    sku: str = None,
+    value_column: str = 'Quantity',
+    overlays: List[str] = None,
+    anomalies: Dict = None,
+    dark_mode: bool = True
+) -> Optional[str]:
+    """
+    create time series chart with optional overlays
+    """
     try:
         cleanup_matplotlib()
         
-        fig, axes = plt.subplots(1, 2, figsize=(10, 3))
+        if sku:
+            plot_df = df[df['SKU'] == sku].copy()
+        else:
+            plot_df = df.copy()
         
-        # ---------- MONTHLY PATTERN ----------
-        ax1 = axes[0]
-        monthly = seasonality_info.get('monthly_pattern', {})
-        if monthly:
-            months = list(monthly.keys())
-            values = list(monthly.values())
-            month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            
-            labels = [month_names[m-1] if 1 <= m <= 12 else str(m) for m in months]
-            
-            if max(values) > min(values):
-                colors = plt.cm.Blues([0.3 + 0.5 * (v - min(values)) / (max(values) - min(values)) for v in values])
-            else:
-                colors = plt.cm.Blues([0.5] * len(values))
-            
-            ax1.bar(labels, values, color=colors)
-            ax1.set_title('Monthly Pattern', fontsize=9)
-            ax1.set_ylabel('Avg Quantity', fontsize=8)
-            ax1.tick_params(axis='both', labelsize=7)
-            ax1.grid(True, alpha=0.3, axis='y')
-            
-            cv = seasonality_info.get('monthly_cv', 0)
-            has_seasonal = seasonality_info.get('has_monthly_seasonality', False)
-            status = "Seasonal" if has_seasonal else "Stable"
-            ax1.set_xlabel(f'{status} (CV: {cv:.2f})', fontsize=7)
+        if len(plot_df) == 0:
+            return None
         
-        # ---------- WEEKLY PATTERN ----------
-        ax2 = axes[1]
-        weekly = seasonality_info.get('weekly_pattern', {})
-        if weekly:
-            days = list(weekly.keys())
-            values = list(weekly.values())
-            day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        plot_df['Date'] = pd.to_datetime(plot_df['Date'])
+        daily = plot_df.groupby('Date')[value_column].sum().reset_index()
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        apply_chart_theme(fig, ax, dark_mode)
+        
+        # main series
+        ax.plot(
+            daily['Date'], daily[value_column],
+            color=ChartConfig.HISTORICAL_COLOR,
+            linewidth=1.5,
+            label=value_column
+        )
+        
+        # overlays
+        if overlays:
+            overlay_colors = ['#4CAF50', '#FF9800', '#9C27B0', '#00BCD4']
             
-            labels = [day_names[d] if 0 <= d <= 6 else str(d) for d in days]
+            for i, overlay_col in enumerate(overlays):
+                if overlay_col in plot_df.columns:
+                    overlay_data = plot_df.groupby('Date')[overlay_col].mean().reset_index()
+                    
+                    ax2 = ax.twinx()
+                    ax2.plot(
+                        overlay_data['Date'], overlay_data[overlay_col],
+                        color=overlay_colors[i % len(overlay_colors)],
+                        linewidth=1,
+                        linestyle='--',
+                        label=overlay_col,
+                        alpha=0.7
+                    )
+                    ax2.set_ylabel(overlay_col, fontsize=10)
+        
+        # anomalies
+        if anomalies and 'dates' in anomalies:
+            ax.scatter(
+                anomalies['dates'],
+                anomalies['values'],
+                color=ChartConfig.ANOMALY_COLOR,
+                s=50,
+                zorder=5,
+                label='Anomalies'
+            )
+        
+        ax.set_xlabel('Date', fontsize=10)
+        ax.set_ylabel(value_column, fontsize=10)
+        ax.set_title(f"Time Series: {sku if sku else 'All SKUs'}", fontsize=12)
+        ax.legend(loc='upper left', fontsize=9)
+        
+        format_x_axis_dates(ax, 'Daily')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        img_base64 = fig_to_base64(fig)
+        cleanup_matplotlib()
+        
+        return img_base64
+        
+    except Exception as e:
+        print(f"time series chart error: {e}")
+        cleanup_matplotlib()
+        return None
+
+
+# ================ DECOMPOSITION CHART ================
+
+def generate_decomposition_chart(
+    decomposition: Dict,
+    dark_mode: bool = True
+) -> Optional[str]:
+    """
+    create seasonal decomposition chart
+    """
+    try:
+        cleanup_matplotlib()
+        
+        if 'error' in decomposition:
+            return None
+        
+        fig, axes = plt.subplots(4, 1, figsize=(12, 10))
+        
+        components = ['observed', 'trend', 'seasonal', 'residual']
+        titles = ['Observed', 'Trend', 'Seasonal', 'Residual']
+        
+        for ax, comp, title in zip(axes, components, titles):
+            apply_chart_theme(fig, ax, dark_mode)
             
-            if max(values) > min(values):
-                colors = plt.cm.Greens([0.3 + 0.5 * (v - min(values)) / (max(values) - min(values)) for v in values])
-            else:
-                colors = plt.cm.Greens([0.5] * len(values))
+            data = decomposition.get(comp, {})
+            if data:
+                dates = pd.to_datetime(list(data.keys()))
+                values = list(data.values())
+                ax.plot(dates, values, color=ChartConfig.HISTORICAL_COLOR, linewidth=1)
             
-            ax2.bar(labels, values, color=colors)
-            ax2.set_title('Weekly Pattern', fontsize=9)
-            ax2.set_ylabel('Avg Quantity', fontsize=8)
-            ax2.tick_params(axis='both', labelsize=7)
-            ax2.grid(True, alpha=0.3, axis='y')
-            
-            cv = seasonality_info.get('weekly_cv', 0)
-            has_seasonal = seasonality_info.get('has_weekly_seasonality', False)
-            status = "Seasonal" if has_seasonal else "Stable"
-            ax2.set_xlabel(f'{status} (CV: {cv:.2f})', fontsize=7)
+            ax.set_ylabel(title, fontsize=10)
+        
+        axes[0].set_title('Seasonal Decomposition', fontsize=12)
+        axes[-1].set_xlabel('Date', fontsize=10)
         
         plt.tight_layout()
         
-        if output_path is None:
-            output_dir = get_output_directory()
-            output_path = output_dir / "seasonality.png"
-        
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(str(output_path), dpi=80, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
-        
+        img_base64 = fig_to_base64(fig)
         cleanup_matplotlib()
         
-        return output_path
+        return img_base64
         
     except Exception as e:
-        print(f"seasonality chart error: {e}")
+        print(f"decomposition chart error: {e}")
+        cleanup_matplotlib()
+        return None
+
+
+# ================ FEATURE IMPORTANCE CHART ================
+
+def generate_feature_importance_chart(
+    importance: Dict[str, float],
+    max_features: int = 20,
+    dark_mode: bool = True
+) -> Optional[str]:
+    """
+    create feature importance bar chart
+    """
+    try:
+        cleanup_matplotlib()
+        
+        if not importance:
+            return None
+        
+        # sort and limit
+        sorted_imp = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+        sorted_imp = sorted_imp[:max_features]
+        
+        names = [item[0] for item in sorted_imp]
+        values = [item[1] for item in sorted_imp]
+        
+        # truncate long names
+        names = [n[:30] + '...' if len(n) > 30 else n for n in names]
+        
+        fig_height = max(6, len(names) * 0.4)
+        fig, ax = plt.subplots(figsize=(10, fig_height))
+        
+        apply_chart_theme(fig, ax, dark_mode)
+        
+        colors = plt.cm.RdYlGn([v for v in values])
+        bars = ax.barh(range(len(names)), values, color=colors)
+        
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(names)
+        ax.invert_yaxis()
+        
+        ax.set_xlabel('Importance Score', fontsize=10)
+        ax.set_title('Feature Importance', fontsize=12)
+        
+        plt.tight_layout()
+        
+        img_base64 = fig_to_base64(fig)
+        cleanup_matplotlib()
+        
+        return img_base64
+        
+    except Exception as e:
+        print(f"feature importance chart error: {e}")
+        cleanup_matplotlib()
+        return None
+
+
+# ================ MODEL COMPARISON CHART ================
+
+def generate_model_comparison_chart(
+    metrics: Dict[str, Dict[str, float]],
+    metric_name: str = 'MAE',
+    dark_mode: bool = True
+) -> Optional[str]:
+    """
+    create model comparison bar chart
+    """
+    try:
+        cleanup_matplotlib()
+        
+        if not metrics:
+            return None
+        
+        models = list(metrics.keys())
+        values = [metrics[m].get(metric_name, 0) for m in models]
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        apply_chart_theme(fig, ax, dark_mode)
+        
+        colors = plt.cm.viridis([i / len(models) for i in range(len(models))])
+        bars = ax.bar(range(len(models)), values, color=colors)
+        
+        ax.set_xticks(range(len(models)))
+        ax.set_xticklabels(models, rotation=45, ha='right')
+        
+        ax.set_ylabel(metric_name, fontsize=10)
+        ax.set_title(f'Model Comparison - {metric_name}', fontsize=12)
+        
+        # add value labels
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2., height,
+                    f'{height:.4f}', ha='center', va='bottom', fontsize=9,
+                    color=ChartConfig.DARK_THEME['text'] if dark_mode else ChartConfig.LIGHT_THEME['text'])
+        
+        plt.tight_layout()
+        
+        img_base64 = fig_to_base64(fig)
+        cleanup_matplotlib()
+        
+        return img_base64
+        
+    except Exception as e:
+        print(f"model comparison chart error: {e}")
         cleanup_matplotlib()
         return None

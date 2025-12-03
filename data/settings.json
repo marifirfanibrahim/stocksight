@@ -1,0 +1,10 @@
+{
+  "dark_mode": true,
+  "auto_advance": false,
+  "auto_clean": false,
+  "output_dir": "",
+  "default_periods": 30,
+  "default_granularity": "Daily",
+  "default_speed": "Fast",
+  "confidence_interval": 0.95
+}

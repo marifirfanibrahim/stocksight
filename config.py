@@ -26,8 +26,20 @@ class Paths:
     # ---------- OUTPUT DIRECTORY ----------
     OUTPUT_DIR = BASE_DIR / "output"
     
-    # ---------- UTILS DIRECTORY ----------
-    UTILS_DIR = BASE_DIR / "utils"
+    # ---------- CACHE DIRECTORY ----------
+    CACHE_DIR = BASE_DIR / "cache"
+    
+    # ---------- MODELS DIRECTORY ----------
+    MODELS_DIR = BASE_DIR / "models"
+    
+    # ---------- PROFILES DIRECTORY ----------
+    PROFILES_DIR = OUTPUT_DIR / "profiles"
+    
+    # ---------- FEATURES DIRECTORY ----------
+    FEATURES_DIR = OUTPUT_DIR / "features"
+    
+    # ---------- FORECASTS DIRECTORY ----------
+    FORECASTS_DIR = OUTPUT_DIR / "forecasts"
     
     # ---------- USER DOCUMENTS ----------
     USER_DOCS = Path.home() / "Documents" / "Stocksight"
@@ -35,10 +47,161 @@ class Paths:
     
     # ---------- DEFAULT FILES ----------
     DEFAULT_CSV = DATA_DIR / "inventory.csv"
-    FORECAST_CHART = OUTPUT_DIR / "forecast.png"
-    FORECAST_DATA = OUTPUT_DIR / "forecast_data.csv"
-    SUMMARY_FILE = OUTPUT_DIR / "summary.txt"
-    LOG_FILE = OUTPUT_DIR / "app.log"
+    BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
+    ALERTS_FILE = DATA_DIR / "alerts.json"
+    SETTINGS_FILE = DATA_DIR / "settings.json"
+
+
+# ================ WINDOW SETTINGS ================
+
+class WindowConfig:
+    """
+    pyqt window settings
+    """
+    # ---------- MAIN WINDOW ----------
+    TITLE = "Stocksight - Inventory Forecasting"
+    WIDTH = 1600
+    HEIGHT = 900
+    MIN_WIDTH = 1200
+    MIN_HEIGHT = 700
+    
+    # ---------- THEME ----------
+    DARK_MODE = True
+    
+    # ---------- FONTS ----------
+    FONT_FAMILY = "Segoe UI"
+    FONT_SIZE_NORMAL = 10
+    FONT_SIZE_HEADER = 14
+    FONT_SIZE_TITLE = 18
+    FONT_SIZE_SMALL = 8
+
+
+# ================ PROFILING SETTINGS ================
+
+class ProfilingConfig:
+    """
+    ydata profiling settings
+    """
+    # ---------- REPORT SETTINGS ----------
+    TITLE = "Data Quality Report"
+    MINIMAL = False
+    EXPLORATIVE = True
+    
+    # ---------- SAMPLES ----------
+    SAMPLE_SIZE = 10000
+    SAMPLE_FOR_LARGE = True
+    LARGE_THRESHOLD = 100000
+    
+    # ---------- CORRELATIONS ----------
+    CORRELATION_THRESHOLD = 0.9
+    
+    # ---------- MISSING VALUES ----------
+    MISSING_THRESHOLD = 0.05
+    
+    # ---------- DUPLICATES ----------
+    CHECK_DUPLICATES = True
+    
+    # ---------- CACHE ----------
+    CACHE_REPORTS = True
+
+
+# ================ CLEANING SETTINGS ================
+
+class CleaningConfig:
+    """
+    data cleaning settings
+    """
+    # ---------- IMPUTATION METHODS ----------
+    IMPUTATION_METHODS = [
+        'mean',
+        'median',
+        'mode',
+        'forward_fill',
+        'backward_fill',
+        'interpolate',
+        'zero',
+        'drop'
+    ]
+    DEFAULT_IMPUTATION = 'forward_fill'
+    
+    # ---------- DUPLICATE HANDLING ----------
+    DUPLICATE_METHODS = [
+        'keep_first',
+        'keep_last',
+        'drop_all'
+    ]
+    DEFAULT_DUPLICATE = 'keep_last'
+    
+    # ---------- OUTLIER HANDLING ----------
+    OUTLIER_METHODS = [
+        'clip',
+        'remove',
+        'winsorize',
+        'none'
+    ]
+    DEFAULT_OUTLIER = 'clip'
+    OUTLIER_STD_THRESHOLD = 3.0
+    
+    # ---------- ROLLBACK ----------
+    MAX_ROLLBACK_STATES = 10
+
+
+# ================ EXPLORATION SETTINGS ================
+
+class ExplorationConfig:
+    """
+    autoviz exploration settings
+    """
+    # ---------- CHART SETTINGS ----------
+    MAX_CHARTS = 20
+    CHART_FORMAT = 'svg'
+    
+    # ---------- DECOMPOSITION ----------
+    DECOMPOSITION_MODEL = 'additive'
+    SEASONAL_PERIOD = 7
+    
+    # ---------- ANOMALY DETECTION ----------
+    ANOMALY_CONTAMINATION = 0.05
+    ANOMALY_METHODS = [
+        'isolation_forest',
+        'local_outlier_factor',
+        'zscore'
+    ]
+    DEFAULT_ANOMALY_METHOD = 'isolation_forest'
+    
+    # ---------- DISPLAY ----------
+    MAX_SKUS_DISPLAY = 50
+
+
+# ================ FEATURE ENGINEERING SETTINGS ================
+
+class FeatureConfig:
+    """
+    tsfresh and featuretools settings
+    """
+    # ---------- TSFRESH ----------
+    TSFRESH_DEFAULTS = 'efficient'
+    MIN_TIMESHIFT = 1
+    MAX_TIMESHIFT = 7
+    
+    # ---------- FEATURE SELECTION ----------
+    RELEVANCE_THRESHOLD = 0.05
+    MAX_FEATURES = 100
+    
+    # ---------- FEATURETOOLS ----------
+    MAX_DEPTH = 2
+    PRIMITIVES = [
+        'sum',
+        'mean',
+        'std',
+        'min',
+        'max',
+        'trend',
+        'skew'
+    ]
+    
+    # ---------- EXPORT ----------
+    EXPORT_FORMATS = ['csv', 'parquet', 'pickle']
 
 
 # ================ AUTOTS SETTINGS ================
@@ -102,115 +265,124 @@ class AutoTSConfig:
         'ensemble': 'all',
         'models_to_validate': 0.35
     }
+    
+    # ---------- EVALUATION METRICS ----------
+    METRICS = ['MAE', 'RMSE', 'MAPE', 'SMAPE']
 
 
-# ================ LARGE DATA SETTINGS ================
+# ================ PIPELINE SETTINGS ================
 
-class LargeDataConfig:
+class PipelineConfig:
     """
-    settings for handling large datasets
+    pipeline orchestration settings
     """
-    # ---------- THRESHOLDS ----------
-    MAX_ROWS = 100000
-    MAX_SKUS = 100
-    MAX_SKUS_CHART = 15
-    MAX_SKUS_DASHBOARD = 10
+    # ---------- STAGES ----------
+    STAGES = [
+        'data_quality',
+        'exploration',
+        'features',
+        'forecasting'
+    ]
     
-    # ---------- PARALLEL SETTINGS ----------
-    PARALLEL_THRESHOLD = 10
-    MAX_WORKERS = 8
+    STAGE_NAMES = {
+        'data_quality': 'Data Quality',
+        'exploration': 'Exploration',
+        'features': 'Feature Engineering',
+        'forecasting': 'Forecasting'
+    }
     
-    # ---------- SAMPLING ----------
-    SAMPLE_ROWS = 50000
-    KEEP_RECENT = True
+    # ---------- AUTO ADVANCE ----------
+    AUTO_ADVANCE = False
     
-    # ---------- MEMORY ----------
-    OPTIMIZE_DTYPES = True
-    FORCE_GC = True
-    
-    # ---------- CHART ----------
-    LOW_DPI = 60
-    MAX_CHART_HEIGHT = 50
+    # ---------- VALIDATION ----------
+    REQUIRE_CLEAN_DATA = True
+    REQUIRE_FEATURES = False
 
 
-# ================ GUI SETTINGS ================
+# ================ ALERT SETTINGS ================
 
-class GUIConfig:
+class AlertConfig:
     """
-    dear pygui settings
+    alert and notification settings
     """
-    # ---------- WINDOW SETTINGS ----------
-    WINDOW_TITLE = "Stocksight - Inventory Forecast"
-    WINDOW_WIDTH = 1400
-    WINDOW_HEIGHT = 800
+    # ---------- ALERT TYPES ----------
+    TYPES = [
+        'anomaly',
+        'model_drift',
+        'pipeline_error',
+        'data_quality',
+        'info'
+    ]
     
-    # ---------- PANEL SETTINGS ----------
-    LEFT_PANEL_WIDTH = 320
+    # ---------- SEVERITY ----------
+    SEVERITY_LEVELS = ['low', 'medium', 'high', 'critical']
     
-    # ---------- COLORS ----------
-    HEADER_COLOR = (255, 200, 100)
-    STATUS_COLOR = (150, 150, 150)
-    SUCCESS_COLOR = (100, 255, 100)
-    ERROR_COLOR = (255, 100, 100)
-    WARNING_COLOR = (255, 200, 100)
+    # ---------- RETENTION ----------
+    MAX_ALERTS = 100
+    AUTO_DISMISS_DAYS = 7
+
+
+# ================ EXPORT SETTINGS ================
+
+class ExportConfig:
+    """
+    export settings
+    """
+    # ---------- TIMESTAMP FORMAT ----------
+    TIMESTAMP_FORMAT = '%Y%m%d_%H%M%S'
     
-    # ---------- FONTS ----------
-    DEFAULT_FONT_SIZE = 14
-    HEADER_FONT_SIZE = 18
-    HELP_TEXT_SIZE = 12
+    # ---------- CSV SETTINGS ----------
+    CSV_INDEX = True
+    CSV_ENCODING = 'utf-8'
+    
+    # ---------- EXCEL SETTINGS ----------
+    EXCEL_ENGINE = 'openpyxl'
+    
+    # ---------- API SETTINGS ----------
+    API_TIMEOUT = 30
+    API_RETRY = 3
+    
+    # ---------- FORMATS ----------
+    AVAILABLE_FORMATS = ['csv', 'xlsx', 'json', 'parquet']
+    DEFAULT_FORMAT = 'csv'
 
 
 # ================ CHART SETTINGS ================
 
 class ChartConfig:
     """
-    matplotlib chart settings
+    chart visualization settings
     """
     # ---------- FIGURE SIZE ----------
-    FIGURE_WIDTH = 10
+    FIGURE_WIDTH = 12
     FIGURE_HEIGHT_PER_SKU = 2.5
     MAX_FIGURE_HEIGHT = 20
     
     # ---------- DPI ----------
-    SAVE_DPI = 80
-    DISPLAY_DPI = 80
-    MAX_IMAGE_HEIGHT_PIXELS = 3000
-    
-    # ---------- LAYOUT ----------
-    MAX_SKUS_PER_PAGE = 8
+    SAVE_DPI = 100
+    DISPLAY_DPI = 100
     
     # ---------- COLORS ----------
-    HISTORICAL_COLOR = 'blue'
-    FORECAST_COLOR = 'red'
-    CONFIDENCE_COLOR = 'lightcoral'
-    CONFIDENCE_ALPHA = 0.2
+    HISTORICAL_COLOR = '#2196F3'
+    FORECAST_COLOR = '#F44336'
+    CONFIDENCE_COLOR = '#FFCDD2'
+    ANOMALY_COLOR = '#FF9800'
+    CONFIDENCE_ALPHA = 0.3
     
-    # ---------- LINE STYLES ----------
-    HISTORICAL_STYLE = '-'
-    FORECAST_STYLE = '--'
+    # ---------- THEME ----------
+    DARK_THEME = {
+        'background': '#1e1e1e',
+        'text': '#ffffff',
+        'grid': '#333333',
+        'accent': '#2196F3'
+    }
     
-    # ---------- LINE WIDTH ----------
-    LINE_WIDTH = 1.5
-    
-    # ---------- GRID ----------
-    GRID_ALPHA = 0.3
-
-
-# ================ SCENARIO SETTINGS ================
-
-class ScenarioConfig:
-    """
-    scenario simulation settings
-    """
-    # ---------- DEMAND SPIKE ----------
-    DEFAULT_SPIKE_MULTIPLIER = 1.5
-    MIN_SPIKE_MULTIPLIER = 0.1
-    MAX_SPIKE_MULTIPLIER = 10.0
-    
-    # ---------- SUPPLY DELAY ----------
-    DEFAULT_DELAY_DAYS = 7
-    MIN_DELAY_DAYS = 1
-    MAX_DELAY_DAYS = 90
+    LIGHT_THEME = {
+        'background': '#ffffff',
+        'text': '#000000',
+        'grid': '#e0e0e0',
+        'accent': '#1976D2'
+    }
 
 
 # ================ DATA SETTINGS ================
@@ -223,7 +395,7 @@ class DataConfig:
     REQUIRED_COLUMNS = ['Date', 'SKU', 'Quantity']
     
     # ---------- OPTIONAL COLUMNS ----------
-    OPTIONAL_COLUMNS = ['Category', 'Warehouse', 'Price', 'Cost']
+    OPTIONAL_COLUMNS = ['Category', 'Warehouse', 'Price', 'Cost', 'Promotion']
     
     # ---------- DATE FORMATS ----------
     DATE_FORMATS = [
@@ -241,38 +413,29 @@ class DataConfig:
     # ---------- GROUPING OPTIONS ----------
     GROUP_OPTIONS = ['Daily', 'Weekly', 'Monthly', 'Quarterly']
     
-    # ---------- PREVIEW ROWS ----------
-    PREVIEW_ROWS = 20
-    
-    # ---------- AGGREGATION ----------
-    DEFAULT_AGGREGATION = 'sum'
-    
     # ---------- VALIDATION ----------
     MIN_DATA_POINTS = 14
     RECOMMENDED_DATA_POINTS = 60
+    
+    # ---------- LARGE DATA ----------
+    MAX_ROWS = 100000
+    MAX_SKUS = 500
+    SAMPLE_SIZE = 50000
 
 
-# ================ EXPORT SETTINGS ================
+# ================ DISPLAY SETTINGS ================
 
-class ExportConfig:
+class DisplayConfig:
     """
-    export settings
+    ui display formats
     """
-    # ---------- TIMESTAMP FORMAT ----------
-    TIMESTAMP_FORMAT = '%Y%m%d_%H%M%S'
+    # ---------- DATE FORMAT ----------
+    DATE_FORMAT = '%d %b %Y'
+    DATETIME_FORMAT = '%d %b %Y %H:%M'
     
-    # ---------- CSV SETTINGS ----------
-    CSV_INDEX = True
-    CSV_ENCODING = 'utf-8'
-    
-    # ---------- DEFAULT LOCATION ----------
-    USE_USER_DOCUMENTS = True
-    ALLOW_CUSTOM_LOCATION = True
-    
-    # ---------- EXPORT OPTIONS ----------
-    EXPORT_CHARTS = True
-    EXPORT_DATA = True
-    EXPORT_SUMMARY = True
+    # ---------- NUMBER FORMAT ----------
+    DECIMAL_PLACES = 2
+    THOUSAND_SEPARATOR = ','
 
 
 # ================ LOGGING SETTINGS ================
@@ -289,19 +452,9 @@ class LogConfig:
     DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
     
     # ---------- FILE SETTINGS ----------
-    MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 mb
+    MAX_LOG_SIZE = 5 * 1024 * 1024
     BACKUP_COUNT = 3
-
-
-# ================ DISPLAY SETTINGS ================
-
-class DisplayConfig:
-    """
-    settings for ui display formats
-    """
-    # ---------- DATE FORMAT ----------
-    # https://strftime.org/
-    DATE_FORMAT = '%d %b %Y'
+    LOG_FILE = Paths.OUTPUT_DIR / 'stocksight.log'
 
 
 # ================ INITIALIZATION ================
@@ -310,6 +463,16 @@ def init_directories():
     """
     create all required directories
     """
-    os.makedirs(Paths.DATA_DIR, exist_ok=True)
-    os.makedirs(Paths.OUTPUT_DIR, exist_ok=True)
-    os.makedirs(Paths.USER_OUTPUT, exist_ok=True)
+    directories = [
+        Paths.DATA_DIR,
+        Paths.OUTPUT_DIR,
+        Paths.CACHE_DIR,
+        Paths.MODELS_DIR,
+        Paths.PROFILES_DIR,
+        Paths.FEATURES_DIR,
+        Paths.FORECASTS_DIR,
+        Paths.USER_OUTPUT
+    ]
+    
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)

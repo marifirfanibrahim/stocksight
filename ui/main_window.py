@@ -1,554 +1,822 @@
 """
 main window for stocksight
-fixed size layout, optimized performance
+pyqt6 tabbed interface with menu bar
 """
 
 
 # ================ IMPORTS ================
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import os
-import sys
-import pandas as pd
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QStatusBar, QProgressBar, QLabel,
+    QMessageBox, QFileDialog, QApplication
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QAction, QIcon
 
-# add project root to system path for consistent imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import WindowConfig, Paths
+from core.state import STATE, PipelineStage
+from core.pipeline import PIPELINE
+from core.alerts import ALERTS
+from core.bookmarks import BOOKMARKS
 
-from config import Paths, DataConfig, AutoTSConfig, ScenarioConfig
-from core.state import STATE
-from ui.callbacks import Callbacks
-from ui.chart_frame import ChartFrame
-from ui.tooltip import Tooltip
-from datetime import datetime, timedelta
-import calendar
+from ui.menu_bar import MenuBar
+from ui.tab_data_quality import DataQualityTab
+from ui.tab_exploration import ExplorationTab
+from ui.tab_features import FeaturesTab
+from ui.tab_forecasting import ForecastingTab
 
 
-# ================ MAIN APPLICATION ================
+# ================ MAIN WINDOW ================
 
-class StocksightApp:
-    # color constants for status
-    COLOR_SUCCESS = "#4caf50"
-    COLOR_ERROR = "#f44336"
-    COLOR_DEFAULT = ""
-
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Stocksight - Inventory Forecast")
-        
-        # ---------- FIXED SIZE FOR PERFORMANCE ----------
-        self.root.geometry("1400x850")
-        self.root.resizable(False, False)
-        
-        # ---------- APPLY THEME AND CREATE UI WIDGETS ----------
-        self.apply_theme()
-        self.create_custom_styles()
-        self.create_ui()
-        
-        # get default label color after ui creation
-        self.COLOR_DEFAULT = self.status_label.cget("foreground")
-
-        # ---------- INITIALIZE CALLBACKS AFTER UI CREATION ----------
-        self.callbacks = Callbacks(self)
-        self.bind_ui_callbacks()
-        
-        # ---------- FINAL UI SETUP ----------
-        self.add_tooltips()
-        
-        # ---------- BIND EVENTS ----------
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.root.bind("<Button-1>", self._clear_focus, add='+')
+class MainWindow(QMainWindow):
+    """
+    main application window
+    """
     
-    def _clear_focus(self, event):
-        # clear focus from widgets when clicking elsewhere
-        widget = event.widget
-        if not isinstance(widget, (ttk.Combobox, tk.Spinbox, ttk.Entry)):
-            self.root.focus_set()
+    # signals
+    status_updated = pyqtSignal(str, bool)
+    progress_updated = pyqtSignal(int, str)
     
-    def apply_theme(self):
-        # apply sv-ttk theme if available
-        try:
-            import sv_ttk
-            sv_ttk.set_theme("dark")
-            self.has_sv_ttk = True
-            print("sv-ttk dark theme applied")
-        except ImportError:
-            print("sv-ttk not found, using default theme")
-            self.has_sv_ttk = False
-            style = ttk.Style()
-            style.configure("Accent.TButton", font=("", 10, "bold"))
-            
-    def create_custom_styles(self):
-        # create custom colored styles for labels and frames
-        style = ttk.Style()
+    def __init__(self):
+        super().__init__()
         
-        # frames cards
-        style.configure("BigCard.TFrame", relief="raised", borderwidth=1)
-        style.configure("Card.TFrame", relief="groove", borderwidth=1)
-        style.configure("ActivityCard.TFrame", relief="groove", borderwidth=1)
+        # ---------- WINDOW SETUP ----------
+        self.setWindowTitle(WindowConfig.TITLE)
+        self.setMinimumSize(WindowConfig.MIN_WIDTH, WindowConfig.MIN_HEIGHT)
+        self.resize(WindowConfig.WIDTH, WindowConfig.HEIGHT)
+        
+        # ---------- STATE ----------
+        self._dark_mode = WindowConfig.DARK_MODE
+        
+        # ---------- CREATE UI ----------
+        self._create_menu_bar()
+        self._create_central_widget()
+        self._create_status_bar()
+        
+        # ---------- APPLY THEME ----------
+        self._apply_theme()
+        
+        # ---------- CONNECT SIGNALS ----------
+        self._connect_signals()
+        
+        # ---------- SETUP CALLBACKS ----------
+        self._setup_pipeline_callbacks()
+        
+        # ---------- INITIAL STATE ----------
+        self._update_ui_state()
     
-    def toggle_theme(self):
-        # toggle between dark and light theme
-        if self.has_sv_ttk:
-            import sv_ttk
-            current = sv_ttk.get_theme()
-            new_theme = "light" if current == "dark" else "dark"
-            sv_ttk.set_theme(new_theme)
-            bg = "#fafafa" if new_theme == "light" else "#1c1c1c"
-            self.chart_frame.canvas.config(bg=bg)
-            
-            # update color constants if needed for visibility
-            self.COLOR_DEFAULT = ttk.Label(self.root).cget("foreground")
-            self.status_label.config(foreground=self.COLOR_DEFAULT)
-
-    def on_closing(self):
-        # handle window close
-        if STATE.is_forecasting:
-            if messagebox.askokcancel("Quit", "Forecast is running. Quit anyway?"):
-                STATE.request_cancel()
-                self.root.destroy()
+    # ================ UI CREATION ================
+    
+    def _create_menu_bar(self):
+        """
+        create menu bar
+        """
+        self.menu_bar = MenuBar(self)
+        self.setMenuBar(self.menu_bar)
+        
+        # connect menu actions
+        self.menu_bar.file_open.triggered.connect(self._on_file_open)
+        self.menu_bar.file_save.triggered.connect(self._on_file_save)
+        self.menu_bar.file_export.triggered.connect(self._on_file_export)
+        self.menu_bar.file_exit.triggered.connect(self.close)
+        
+        self.menu_bar.view_dark_mode.triggered.connect(self._toggle_theme)
+        self.menu_bar.view_refresh.triggered.connect(self._refresh_current_tab)
+        
+        self.menu_bar.bookmarks_manage.triggered.connect(self._show_bookmarks)
+        self.menu_bar.alerts_view.triggered.connect(self._show_alerts)
+        self.menu_bar.settings_open.triggered.connect(self._show_settings)
+    
+    def _create_central_widget(self):
+        """
+        create central widget with tabs
+        """
+        central = QWidget()
+        self.setCentralWidget(central)
+        
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # ---------- PIPELINE INDICATOR ----------
+        self.pipeline_widget = PipelineIndicator()
+        layout.addWidget(self.pipeline_widget)
+        
+        # ---------- TAB WIDGET ----------
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setDocumentMode(True)
+        self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        layout.addWidget(self.tab_widget)
+        
+        # ---------- CREATE TABS ----------
+        self.tab_data_quality = DataQualityTab(self)
+        self.tab_exploration = ExplorationTab(self)
+        self.tab_features = FeaturesTab(self)
+        self.tab_forecasting = ForecastingTab(self)
+        
+        self.tab_widget.addTab(self.tab_data_quality, "Data Quality")
+        self.tab_widget.addTab(self.tab_exploration, "Exploration")
+        self.tab_widget.addTab(self.tab_features, "Features")
+        self.tab_widget.addTab(self.tab_forecasting, "Forecasting")
+        
+        # connect tab changed
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+    
+    def _create_status_bar(self):
+        """
+        create status bar
+        """
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        
+        # status label
+        self.status_label = QLabel("Ready")
+        self.status_bar.addWidget(self.status_label, 1)
+        
+        # progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumWidth(200)
+        self.progress_bar.setVisible(False)
+        self.status_bar.addPermanentWidget(self.progress_bar)
+        
+        # alert indicator
+        self.alert_label = QLabel()
+        self.alert_label.setStyleSheet("color: #FF9800; font-weight: bold;")
+        self.status_bar.addPermanentWidget(self.alert_label)
+        self._update_alert_indicator()
+    
+    # ================ THEME ================
+    
+    def _apply_theme(self):
+        """
+        apply dark or light theme
+        """
+        if self._dark_mode:
+            self._apply_dark_theme()
         else:
-            self.root.destroy()
+            self._apply_light_theme()
     
-    # ================ MAIN UI ================
+    def _apply_dark_theme(self):
+        """
+        apply dark theme stylesheet
+        """
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #1e1e1e;
+            }
+            QWidget {
+                background-color: #1e1e1e;
+                color: #ffffff;
+            }
+            QTabWidget::pane {
+                border: 1px solid #333333;
+                background-color: #252525;
+            }
+            QTabBar::tab {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0078d4;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #3d3d3d;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1084d8;
+            }
+            QPushButton:pressed {
+                background-color: #006cbd;
+            }
+            QPushButton:disabled {
+                background-color: #4d4d4d;
+                color: #808080;
+            }
+            QPushButton[secondary="true"] {
+                background-color: #3d3d3d;
+            }
+            QPushButton[secondary="true"]:hover {
+                background-color: #4d4d4d;
+            }
+            QLineEdit, QTextEdit, QPlainTextEdit {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px;
+                color: #ffffff;
+            }
+            QLineEdit:focus, QTextEdit:focus {
+                border-color: #0078d4;
+            }
+            QComboBox {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px;
+                color: #ffffff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                selection-background-color: #0078d4;
+            }
+            QSpinBox, QDoubleSpinBox {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px;
+                color: #ffffff;
+            }
+            QSlider::groove:horizontal {
+                background-color: #3d3d3d;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background-color: #0078d4;
+                width: 16px;
+                height: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
+            }
+            QProgressBar {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                text-align: center;
+                color: #ffffff;
+            }
+            QProgressBar::chunk {
+                background-color: #0078d4;
+                border-radius: 3px;
+            }
+            QScrollBar:vertical {
+                background-color: #2d2d2d;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #4d4d4d;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #5d5d5d;
+            }
+            QScrollBar:horizontal {
+                background-color: #2d2d2d;
+                height: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: #4d4d4d;
+                border-radius: 6px;
+                min-width: 20px;
+            }
+            QTableWidget, QTreeWidget, QListWidget {
+                background-color: #252525;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                gridline-color: #3d3d3d;
+            }
+            QTableWidget::item, QTreeWidget::item, QListWidget::item {
+                padding: 6px;
+            }
+            QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
+                background-color: #0078d4;
+            }
+            QHeaderView::section {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                padding: 8px;
+                border: none;
+                border-right: 1px solid #3d3d3d;
+                border-bottom: 1px solid #3d3d3d;
+            }
+            QGroupBox {
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                margin-top: 12px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #0078d4;
+            }
+            QMenuBar {
+                background-color: #2d2d2d;
+                color: #ffffff;
+            }
+            QMenuBar::item:selected {
+                background-color: #3d3d3d;
+            }
+            QMenu {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+            }
+            QMenu::item:selected {
+                background-color: #0078d4;
+            }
+            QStatusBar {
+                background-color: #2d2d2d;
+                color: #ffffff;
+            }
+            QToolTip {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                padding: 4px;
+            }
+            QLabel[heading="true"] {
+                font-size: 14px;
+                font-weight: bold;
+                color: #0078d4;
+            }
+            QFrame[card="true"] {
+                background-color: #252525;
+                border: 1px solid #3d3d3d;
+                border-radius: 8px;
+                padding: 12px;
+            }
+        """)
     
-    def create_ui(self):
-        # create main user interface fixed layout
-        # ---------- MAIN CONTAINER ----------
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # ---------- LEFT PANEL (FIXED 320px) ----------
-        left_frame = ttk.Frame(main_frame, width=320)
-        left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
-        left_frame.pack_propagate(False)
-        
-        self.create_left_panel(left_frame)
-        
-        # ---------- RIGHT PANEL ----------
-        right_frame = ttk.Frame(main_frame)
-        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        self.create_right_panel(right_frame)
-        self.create_status_bar()
-
-    def bind_ui_callbacks(self):
-        # bind all widget commands to their callback functions
-        # controls tab
-        self.upload_btn.config(command=self.callbacks.upload_file)
-        self.remap_btn.config(command=self.callbacks.remap_columns)
-        self.remove_data_btn.config(command=self.callbacks.remove_data)
-        self.gran_combo.bind("<<ComboboxSelected>>", self.callbacks.on_granularity_changed)
-        self.forecast_btn.config(command=self.callbacks.run_forecast)
-        self.load_model_btn.config(command=self.callbacks.load_model)
-        self.remove_model_btn.config(command=self.callbacks.remove_model)
-        self.export_btn.config(command=self.callbacks.export_results)
-        self.save_model_btn.config(command=self.callbacks.export_model)
-        self.theme_btn.config(command=self.toggle_theme)
-
-        # scenarios tab
-        self.scenario_type_combo.bind("<<ComboboxSelected>>", self.callbacks.on_scenario_type_changed)
-        self.multiplier_scale.config(command=self.callbacks.update_multiplier_label)
-        self.delay_scale.config(command=self.callbacks.update_delay_label)
-        self.week_btn.config(command=self.callbacks.set_date_week)
-        self.month_btn.config(command=self.callbacks.set_date_month)
-        self.next_btn.config(command=self.callbacks.set_date_next)
-        self.apply_scenario_btn.config(command=self.callbacks.apply_scenario)
-        self.reset_scenarios_btn.config(command=self.callbacks.reset_scenarios)
-        
-        # chart tab
-        self.chart_sku_combo.bind("<<ComboboxSelected>>", self.callbacks.on_chart_sku_changed)
-        self.refresh_chart_btn.config(command=self.callbacks.refresh_chart)
-        self.summary_chart_btn.config(command=self.callbacks.show_summary)
-        self.zoom_chart_btn.config(command=self.callbacks.zoom_chart)
-
-        # dashboard tab
-        self.dash_sku_combo.bind("<<ComboboxSelected>>", self.callbacks.on_dash_sku_changed)
-        self.refresh_dash_btn.config(command=self.callbacks.refresh_dashboard)
-        self.seasonality_btn.config(command=self.callbacks.show_seasonality)
-        self.report_btn.config(command=self.callbacks.show_diagnostics)
-
-    def add_tooltips(self):
-        # add descriptive tooltips to complex widgets
-        Tooltip(self.gran_combo, "Group data before forecasting.\nWeekly/Monthly is faster and smoother for noisy data.")
-        Tooltip(self.speed_combo, "Superfast: Quickest, least accurate.\nFast: Good balance.\nBalanced: More thorough.\nAccurate: Slowest, most comprehensive.")
-        Tooltip(self.scenario_type_combo, "Demand Spike: Increase demand by a multiplier for a period.\nSupply Delay: Shift incoming supply forward by N days.")
-        Tooltip(self.multiplier_scale, "Factor to multiply demand by (e.g., 2.0 = 200% of normal).")
-        Tooltip(self.delay_scale, "Number of days to delay supply for a SKU.")
-        Tooltip(self.days_spinbox, "Number of future periods to forecast, based on the selected Granularity.")
-
-    def create_left_panel(self, parent):
-        # create left control panel
-        notebook = ttk.Notebook(parent)
-        notebook.pack(fill=tk.BOTH, expand=True)
-        
-        # ---------- CONTROLS TAB ----------
-        controls_frame = ttk.Frame(notebook, padding=(15, 10))
-        notebook.add(controls_frame, text="Controls")
-        self.create_controls_tab(controls_frame)
-        
-        # ---------- SCENARIOS TAB ----------
-        scenarios_frame = ttk.Frame(notebook, padding=(15, 10))
-        notebook.add(scenarios_frame, text="Scenarios")
-        self.create_scenarios_tab(scenarios_frame)
+    def _apply_light_theme(self):
+        """
+        apply light theme stylesheet
+        """
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f5f5f5;
+            }
+            QWidget {
+                background-color: #f5f5f5;
+                color: #1e1e1e;
+            }
+            QTabWidget::pane {
+                border: 1px solid #e0e0e0;
+                background-color: #ffffff;
+            }
+            QTabBar::tab {
+                background-color: #e8e8e8;
+                color: #1e1e1e;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0078d4;
+                color: #ffffff;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #d8d8d8;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1084d8;
+            }
+            QPushButton:pressed {
+                background-color: #006cbd;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #808080;
+            }
+            QPushButton[secondary="true"] {
+                background-color: #e0e0e0;
+                color: #1e1e1e;
+            }
+            QPushButton[secondary="true"]:hover {
+                background-color: #d0d0d0;
+            }
+            QLineEdit, QTextEdit, QPlainTextEdit {
+                background-color: #ffffff;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 6px;
+                color: #1e1e1e;
+            }
+            QLineEdit:focus, QTextEdit:focus {
+                border-color: #0078d4;
+            }
+            QComboBox {
+                background-color: #ffffff;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 6px;
+                color: #1e1e1e;
+            }
+            QTableWidget, QTreeWidget, QListWidget {
+                background-color: #ffffff;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+            }
+            QHeaderView::section {
+                background-color: #f0f0f0;
+                color: #1e1e1e;
+                padding: 8px;
+                border: none;
+                border-right: 1px solid #d0d0d0;
+                border-bottom: 1px solid #d0d0d0;
+            }
+            QGroupBox {
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                margin-top: 12px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                color: #0078d4;
+            }
+            QMenuBar {
+                background-color: #f0f0f0;
+                color: #1e1e1e;
+            }
+            QMenu {
+                background-color: #ffffff;
+                color: #1e1e1e;
+                border: 1px solid #d0d0d0;
+            }
+            QMenu::item:selected {
+                background-color: #0078d4;
+                color: #ffffff;
+            }
+            QStatusBar {
+                background-color: #f0f0f0;
+            }
+            QLabel[heading="true"] {
+                font-size: 14px;
+                font-weight: bold;
+                color: #0078d4;
+            }
+            QFrame[card="true"] {
+                background-color: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 12px;
+            }
+        """)
     
-    def create_controls_tab(self, parent):
-        # create controls tab content compact layout
-        # ---------- DATA ----------
-        ttk.Label(parent, text="DATA", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
+    def _toggle_theme(self):
+        """
+        toggle between dark and light theme
+        """
+        self._dark_mode = not self._dark_mode
+        STATE.settings['dark_mode'] = self._dark_mode
+        self._apply_theme()
         
-        self.upload_btn = ttk.Button(parent, text="Upload CSV/Excel", style="Accent.TButton")
-        self.upload_btn.pack(fill=tk.X, pady=1)
-        self.remap_btn = ttk.Button(parent, text="Remap Columns")
-        self.remap_btn.pack(fill=tk.X, pady=1)
-        self.remove_data_btn = ttk.Button(parent, text="Remove Data")
-        self.remove_data_btn.pack(fill=tk.X, pady=1)
+        # update menu checkmark
+        self.menu_bar.view_dark_mode.setChecked(self._dark_mode)
         
-        self.data_info_var = tk.StringVar(value="No data loaded")
-        ttk.Label(parent, textvariable=self.data_info_var, 
-                  foreground="gray", wraplength=270, font=("", 8)).pack(anchor=tk.W, pady=(5, 0))
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        # ---------- SEASONALITY ----------
-        ttk.Label(parent, text="SEASONALITY", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        self.seasonality_var = tk.StringVar(value="No data analyzed")
-        ttk.Label(parent, textvariable=self.seasonality_var,
-                  foreground="gray", wraplength=270, font=("", 8)).pack(anchor=tk.W)
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        # ---------- FORECAST ----------
-        ttk.Label(parent, text="FORECAST", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        ttk.Label(parent, text="Periods to Forecast:", font=("", 8)).pack(anchor=tk.W)
-        self.days_var = tk.IntVar(value=AutoTSConfig.DEFAULT_FORECAST_DAYS)
-        self.days_spinbox = ttk.Spinbox(parent, from_=1, to=365, textvariable=self.days_var, width=12)
-        self.days_spinbox.pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="Granularity:", font=("", 8)).pack(anchor=tk.W, pady=(5, 0))
-        self.granularity_var = tk.StringVar(value="Daily")
-        self.gran_combo = ttk.Combobox(parent, textvariable=self.granularity_var,
-                     values=DataConfig.GROUP_OPTIONS, state="readonly", width=16)
-        self.gran_combo.pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="Speed:", font=("", 8)).pack(anchor=tk.W, pady=(5, 0))
-        self.speed_var = tk.StringVar(value="Fast")
-        self.speed_combo = ttk.Combobox(parent, textvariable=self.speed_var,
-                     values=["Superfast", "Fast", "Balanced", "Accurate"],
-                     state="readonly", width=16)
-        self.speed_combo.pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        self.forecast_btn = ttk.Button(parent, text="Run Forecast", style="Accent.TButton")
-        self.forecast_btn.pack(fill=tk.X, pady=2, ipady=5)
-        
-        self.timer_var = tk.StringVar(value="")
-        ttk.Label(parent, textvariable=self.timer_var, foreground="gray", font=("", 8)).pack(anchor=tk.W)
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        # ---------- MODEL ----------
-        ttk.Label(parent, text="MODEL", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        self.model_info_var = tk.StringVar(value="No model loaded")
-        ttk.Label(parent, textvariable=self.model_info_var,
-                  foreground="gray", wraplength=270, font=("", 8)).pack(anchor=tk.W)
-        
-        model_btns = ttk.Frame(parent)
-        model_btns.pack(fill=tk.X, pady=3)
-        
-        self.load_model_btn = ttk.Button(model_btns, text="Load Model")
-        self.load_model_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.remove_model_btn = ttk.Button(model_btns, text="Remove Model")
-        
-        # hide remove button initially
-        self.remove_model_btn.pack_forget()
-
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        # ---------- EXPORT & SETTINGS ----------
-        ttk.Label(parent, text="UTILITIES", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        export_btns = ttk.Frame(parent)
-        export_btns.pack(fill=tk.X, pady=3)
-        
-        self.export_btn = ttk.Button(export_btns, text="Export")
-        self.export_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.save_model_btn = ttk.Button(export_btns, text="Save Model")
-        self.save_model_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.theme_btn = ttk.Button(export_btns, text="Theme")
-        self.theme_btn.pack(side=tk.LEFT)
+        # refresh tabs
+        self._refresh_current_tab()
     
-    def create_scenarios_tab(self, parent):
-        # create scenarios tab content
-        # ---------- SCENARIO TYPE ----------
-        ttk.Label(parent, text="SCENARIO", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        ttk.Label(parent, text="Type:", font=("", 8)).pack(anchor=tk.W)
-        self.scenario_type_var = tk.StringVar(value="Demand Spike")
-        self.scenario_type_combo = ttk.Combobox(parent, textvariable=self.scenario_type_var,
-                                                 values=["Demand Spike", "Supply Delay"],
-                                                 state="readonly", width=16)
-        self.scenario_type_combo.pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        ttk.Label(parent, text="Target SKU:", font=("", 8)).pack(anchor=tk.W)
-        self.scenario_sku_var = tk.StringVar()
-        self.scenario_sku_combo = ttk.Combobox(parent, textvariable=self.scenario_sku_var,
-                                                state="readonly", width=20)
-        self.scenario_sku_combo.pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        # ---------- PARAMETERS ----------
-        ttk.Label(parent, text="PARAMETERS", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        self.multiplier_frame = ttk.Frame(parent)
-        self.multiplier_frame.pack(fill=tk.X)
-        
-        ttk.Label(self.multiplier_frame, text="Multiplier:", font=("", 8)).pack(anchor=tk.W)
-        self.multiplier_var = tk.DoubleVar(value=ScenarioConfig.DEFAULT_SPIKE_MULTIPLIER)
-        self.multiplier_scale = ttk.Scale(self.multiplier_frame, from_=0.1, to=5.0,
-                                      variable=self.multiplier_var, orient=tk.HORIZONTAL)
-        self.multiplier_scale.pack(fill=tk.X, pady=1)
-        self.multiplier_label = ttk.Label(self.multiplier_frame, text="1.5x", font=("", 8))
-        self.multiplier_label.pack(anchor=tk.W)
-        
-        self.delay_frame = ttk.Frame(parent)
-        ttk.Label(self.delay_frame, text="Delay Days:", font=("", 8)).pack(anchor=tk.W)
-        self.delay_var = tk.IntVar(value=ScenarioConfig.DEFAULT_DELAY_DAYS)
-        self.delay_scale = ttk.Scale(self.delay_frame, from_=1, to=90,
-                                 variable=self.delay_var, orient=tk.HORIZONTAL)
-        self.delay_scale.pack(fill=tk.X, pady=1)
-        self.delay_label = ttk.Label(self.delay_frame, text="7 days", font=("", 8))
-        self.delay_label.pack(anchor=tk.W)
-        
-        ttk.Label(parent, text="").pack(pady=3)
-        
-        # ---------- DATE RANGE ----------
-        ttk.Label(parent, text="DATE RANGE", font=("", 10, "bold")).pack(anchor=tk.W)
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(3, 8))
-        
-        quick_btns = ttk.Frame(parent)
-        quick_btns.pack(anchor=tk.W, pady=3)
-        self.week_btn = ttk.Button(quick_btns, text="Week", width=6)
-        self.week_btn.pack(side=tk.LEFT, padx=(0, 3))
-        self.month_btn = ttk.Button(quick_btns, text="Month", width=6)
-        self.month_btn.pack(side=tk.LEFT, padx=(0, 3))
-        self.next_btn = ttk.Button(quick_btns, text="Next", width=6)
-        self.next_btn.pack(side=tk.LEFT)
-        
-        ttk.Label(parent, text="Start:", font=("", 8)).pack(anchor=tk.W, pady=(5, 0))
-        self.start_date_var = tk.StringVar(value="2024-01-01")
-        ttk.Entry(parent, textvariable=self.start_date_var, width=15).pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="End:", font=("", 8)).pack(anchor=tk.W, pady=(5, 0))
-        self.end_date_var = tk.StringVar(value="2024-01-31")
-        ttk.Entry(parent, textvariable=self.end_date_var, width=15).pack(anchor=tk.W, pady=1)
-        
-        ttk.Label(parent, text="").pack(pady=10)
-        
-        # ---------- ACTION BUTTONS ----------
-        action_btns = ttk.Frame(parent)
-        action_btns.pack(anchor=tk.W, pady=5)
-        self.apply_scenario_btn = ttk.Button(action_btns, text="Apply Scenario", style="Accent.TButton")
-        self.apply_scenario_btn.pack(side=tk.LEFT, padx=(0, 10))
-        self.reset_scenarios_btn = ttk.Button(action_btns, text="Reset All")
-        self.reset_scenarios_btn.pack(side=tk.LEFT)
+    # ================ SIGNALS ================
     
-    def create_right_panel(self, parent):
-        # create right content panel
-        self.right_notebook = ttk.Notebook(parent)
-        self.right_notebook.pack(fill=tk.BOTH, expand=True)
-        
-        preview_frame = ttk.Frame(self.right_notebook, padding=10)
-        self.right_notebook.add(preview_frame, text="Data Preview")
-        self.create_preview_tab(preview_frame)
-        
-        chart_tab = ttk.Frame(self.right_notebook, padding=10)
-        self.right_notebook.add(chart_tab, text="Forecast Chart")
-        self.create_chart_tab(chart_tab)
-        
-        dashboard_frame = ttk.Frame(self.right_notebook, padding=10)
-        self.right_notebook.add(dashboard_frame, text="Dashboard")
-        self.create_dashboard_tab(dashboard_frame)
+    def _connect_signals(self):
+        """
+        connect internal signals
+        """
+        self.status_updated.connect(self._on_status_updated)
+        self.progress_updated.connect(self._on_progress_updated)
     
-    def create_preview_tab(self, parent):
-        # create data preview tab
-        self.preview_info_var = tk.StringVar(value="Load a file to see data preview")
-        ttk.Label(parent, textvariable=self.preview_info_var, foreground="gray").pack(anchor=tk.W, pady=(0, 5))
-        
-        tree_frame = ttk.Frame(parent)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
-        
-        columns = ("Date", "SKU", "Quantity")
-        self.preview_tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
-        
-        for col in columns:
-            self.preview_tree.heading(col, text=col)
-            self.preview_tree.column(col, width=150)
-        
-        y_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.preview_tree.yview)
-        x_scroll = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.preview_tree.xview)
-        self.preview_tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-        
-        self.preview_tree.grid(row=0, column=0, sticky="nsew")
-        y_scroll.grid(row=0, column=1, sticky="ns")
-        x_scroll.grid(row=1, column=0, sticky="ew")
-        
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+    def _setup_pipeline_callbacks(self):
+        """
+        setup pipeline progress callbacks
+        """
+        PIPELINE.add_progress_callback(self._on_pipeline_progress)
+        PIPELINE.add_stage_callback(self._on_pipeline_stage_change)
+        ALERTS.add_callback(self._on_alert_change)
     
-    def create_chart_tab(self, parent):
-        # create forecast chart tab
-        controls = ttk.Frame(parent)
-        controls.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(controls, text="SKU:").pack(side=tk.LEFT)
-        self.chart_sku_var = tk.StringVar(value="All SKUs")
-        self.chart_sku_combo = ttk.Combobox(controls, textvariable=self.chart_sku_var,
-                                             values=["All SKUs"], state="readonly", width=15)
-        self.chart_sku_combo.pack(side=tk.LEFT, padx=(5, 20))
-        
-        self.refresh_chart_btn = ttk.Button(controls, text="Refresh")
-        self.refresh_chart_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.summary_chart_btn = ttk.Button(controls, text="Summary")
-        self.summary_chart_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.zoom_chart_btn = ttk.Button(controls, text="Zoom")
-        self.zoom_chart_btn.pack(side=tk.LEFT)
-        
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-        
-        self.chart_frame = ChartFrame(parent)
-        self.chart_frame.pack(fill=tk.BOTH, expand=True)
+    def _on_pipeline_progress(self, stage, progress, message):
+        """
+        handle pipeline progress update
+        """
+        self.progress_updated.emit(int(progress), message)
+        self.pipeline_widget.update_progress(stage, progress)
     
-    def create_dashboard_tab(self, parent):
-        # create dashboard tab with big card and box-styled stats
-        controls = ttk.Frame(parent)
-        controls.pack(fill=tk.X, pady=(0, 10))
-        
-        # no separate grouping for dashboard syncs with main granularity
-        ttk.Label(controls, text="SKU Filter:").pack(side=tk.LEFT)
-        self.dash_sku_var = tk.StringVar(value="All SKUs")
-        self.dash_sku_combo = ttk.Combobox(controls, textvariable=self.dash_sku_var,
-                                            values=["All SKUs"], state="readonly", width=15)
-        self.dash_sku_combo.pack(side=tk.LEFT, padx=(5, 20))
-        
-        self.refresh_dash_btn = ttk.Button(controls, text="Refresh")
-        self.refresh_dash_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.seasonality_btn = ttk.Button(controls, text="Seasonality")
-        self.seasonality_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.report_btn = ttk.Button(controls, text="SKU Report")
-        self.report_btn.pack(side=tk.LEFT)
-        
-        # ---------- STATS IN BOXES ----------
-        ttk.Label(parent, text="STATISTICS", font=("", 11, "bold")).pack(anchor=tk.W, pady=(10, 5))
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 10))
-        
-        stats_container = ttk.Frame(parent)
-        stats_container.pack(fill=tk.X)
-        self.stat_labels = {}
-        
-        def create_stat_card(container, title, key, big_font=("", 14, "bold")):
-            card = ttk.Frame(container, style="Card.TFrame", padding=10)
-            card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-            ttk.Label(card, text=title, foreground="gray", font=("", 9)).pack(anchor=tk.W)
-            lbl = ttk.Label(card, text="--", font=big_font)
-            lbl.pack(anchor=tk.W, pady=(5, 0))
-            self.stat_labels[key] = lbl
-            return card
-
-        row1 = ttk.Frame(stats_container)
-        row1.pack(fill=tk.X, pady=5)
-        create_stat_card(row1, "Total Forecast", "total")
-        create_stat_card(row1, "Avg Daily (Overall)", "avg")
-        create_stat_card(row1, "Unique SKUs", "skus")
-        create_stat_card(row1, "Avg Error Margin", "error", big_font=("", 12, "bold"))
-
-        row2 = ttk.Frame(stats_container)
-        row2.pack(fill=tk.X, pady=5)
-        create_stat_card(row2, "Date Range", "date_range", big_font=("", 11))
-        create_stat_card(row2, "95% Confidence Range", "confidence", big_font=("", 11))
-            
-        ttk.Label(parent, text="").pack(pady=5)
-        
-        # ---------- ACTIVITY CARDS VERTICAL FULL WIDTH ----------
-        canvas_container = ttk.Frame(parent)
-        canvas_container.pack(fill=tk.BOTH, expand=True)
-        
-        self.activity_canvas = tk.Canvas(canvas_container, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_container, orient="vertical", command=self.activity_canvas.yview)
-        self.activity_card_frame = ttk.Frame(self.activity_canvas)
-        
-        self.canvas_window_id = self.activity_canvas.create_window((0, 0), window=self.activity_card_frame, anchor="nw")
-        
-        self.activity_card_frame.bind("<Configure>", lambda e: self.activity_canvas.configure(scrollregion=self.activity_canvas.bbox("all")))
-        self.activity_canvas.bind("<Configure>", self._on_canvas_configure)
-        self.activity_canvas.configure(yscrollcommand=scrollbar.set)
-        
-        self.activity_canvas.bind("<Enter>", self._bind_mousewheel_activity)
-        self.activity_canvas.bind("<Leave>", self._unbind_mousewheel_activity)
-        
-        self.activity_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    def _on_pipeline_stage_change(self, stage, status):
+        """
+        handle pipeline stage change
+        """
+        self.pipeline_widget.update_stage(stage, status)
+        self._update_ui_state()
     
-    def _on_canvas_configure(self, event):
-        # make inner frame match canvas width
-        self.activity_canvas.itemconfig(self.canvas_window_id, width=event.width)
+    def _on_alert_change(self, action, alert_id):
+        """
+        handle alert change
+        """
+        self._update_alert_indicator()
     
-    def _on_activity_mousewheel(self, event):
-        # scroll activity canvas
-        self.activity_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+    # ================ SLOTS ================
     
-    def _bind_mousewheel_activity(self, event):
-        # bind mousewheel for activity canvas
-        self.activity_canvas.bind_all("<MouseWheel>", self._on_activity_mousewheel)
-    
-    def _unbind_mousewheel_activity(self, event):
-        # unbind mousewheel for activity canvas
-        self.activity_canvas.unbind_all("<MouseWheel>")
-    
-    # ================ STATUS BAR ================
-    
-    def create_status_bar(self):
-        # create status bar at bottom
-        status_frame = ttk.Frame(self.root)
-        status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=2)
-        
-        self.status_label = ttk.Label(status_frame, text="Ready")
-        self.status_label.pack(side=tk.LEFT)
-        
-        self.progress_bar = ttk.Progressbar(status_frame, length=200, mode="indeterminate")
-    
-    def set_status(self, message, is_error=False, is_success=False):
-        # update status bar message and color
-        self.status_label.config(text=message)
+    def _on_status_updated(self, message: str, is_error: bool):
+        """
+        update status bar
+        """
+        self.status_label.setText(message)
         
         if is_error:
-            self.status_label.config(foreground=self.COLOR_ERROR)
-        elif is_success:
-            self.status_label.config(foreground=self.COLOR_SUCCESS)
+            self.status_label.setStyleSheet("color: #f44336;")
         else:
-            self.status_label.config(foreground=self.COLOR_DEFAULT)
-        
-        print(f"[STATUS] {message}")
+            self.status_label.setStyleSheet("")
     
-    def show_progress(self, show=True):
-        # show or hide progress bar
-        if show:
-            self.progress_bar.pack(side=tk.RIGHT, padx=10)
-            self.progress_bar.start(10)
+    def _on_progress_updated(self, value: int, message: str):
+        """
+        update progress bar
+        """
+        if value < 0:
+            self.progress_bar.setVisible(False)
         else:
-            self.progress_bar.stop()
-            self.progress_bar.pack_forget()
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(value)
+        
+        if message:
+            self.status_label.setText(message)
+    
+    def _on_tab_changed(self, index: int):
+        """
+        handle tab change
+        """
+        # update tab if needed
+        current_tab = self.tab_widget.currentWidget()
+        if hasattr(current_tab, 'on_tab_activated'):
+            current_tab.on_tab_activated()
+    
+    def _on_file_open(self):
+        """
+        handle file open action
+        """
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Data File",
+            str(Paths.DATA_DIR),
+            "All Supported (*.csv *.xlsx *.xls);;CSV (*.csv);;Excel (*.xlsx *.xls)"
+        )
+        
+        if file_path:
+            self.tab_data_quality.load_file(file_path)
+    
+    def _on_file_save(self):
+        """
+        handle file save action
+        """
+        if STATE.forecast_data is not None:
+            from core.data_operations import export_results
+            success, message = export_results()
+            self.set_status(message, not success)
+        else:
+            self.set_status("No data to save", True)
+    
+    def _on_file_export(self):
+        """
+        handle export action
+        """
+        from ui.dialogs.export_dialog import ExportDialog
+        dialog = ExportDialog(self)
+        dialog.exec()
+    
+    def _refresh_current_tab(self):
+        """
+        refresh current tab
+        """
+        current_tab = self.tab_widget.currentWidget()
+        if hasattr(current_tab, 'refresh'):
+            current_tab.refresh()
+    
+    def _show_bookmarks(self):
+        """
+        show bookmarks dialog
+        """
+        from ui.dialogs.bookmark_dialog import BookmarkDialog
+        dialog = BookmarkDialog(self)
+        dialog.exec()
+    
+    def _show_alerts(self):
+        """
+        show alerts panel
+        """
+        from ui.dialogs.alert_dialog import AlertDialog
+        dialog = AlertDialog(self)
+        dialog.exec()
+    
+    def _show_settings(self):
+        """
+        show settings dialog
+        """
+        from ui.dialogs.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self._apply_theme()
+    
+    # ================ PUBLIC METHODS ================
+    
+    def set_status(self, message: str, is_error: bool = False):
+        """
+        set status bar message
+        """
+        self.status_updated.emit(message, is_error)
+    
+    def show_progress(self, value: int = -1, message: str = ""):
+        """
+        show or hide progress bar
+        """
+        self.progress_updated.emit(value, message)
+    
+    def switch_to_tab(self, index: int):
+        """
+        switch to specified tab
+        """
+        if 0 <= index < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(index)
+    
+    def get_dark_mode(self) -> bool:
+        """
+        get current theme mode
+        """
+        return self._dark_mode
+    
+    # ================ HELPERS ================
+    
+    def _update_ui_state(self):
+        """
+        update ui based on current state
+        """
+        has_data = STATE.clean_data is not None
+        has_forecast = STATE.forecast_data is not None
+        
+        # update menu items
+        self.menu_bar.file_save.setEnabled(has_forecast)
+        self.menu_bar.file_export.setEnabled(has_data or has_forecast)
+    
+    def _update_alert_indicator(self):
+        """
+        update alert count indicator
+        """
+        count = ALERTS.get_count()
+        
+        if count > 0:
+            self.alert_label.setText(f"⚠ {count} Alert{'s' if count > 1 else ''}")
+            self.alert_label.setVisible(True)
+        else:
+            self.alert_label.setVisible(False)
+    
+    # ================ EVENTS ================
+    
+    def closeEvent(self, event):
+        """
+        handle window close
+        """
+        if STATE.is_processing:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Exit",
+                "A process is running. Exit anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                STATE.request_cancel()
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
+
+
+# ================ PIPELINE INDICATOR ================
+
+class PipelineIndicator(QWidget):
+    """
+    visual pipeline progress indicator
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.setFixedHeight(40)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(5)
+        
+        # stage indicators
+        self.stages = {}
+        stage_names = ['Data Quality', 'Exploration', 'Features', 'Forecasting']
+        stage_keys = [
+            PipelineStage.DATA_QUALITY,
+            PipelineStage.EXPLORATION,
+            PipelineStage.FEATURES,
+            PipelineStage.FORECASTING
+        ]
+        
+        for i, (key, name) in enumerate(zip(stage_keys, stage_names)):
+            # stage label
+            label = QLabel(name)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setFixedWidth(120)
+            label.setStyleSheet("""
+                QLabel {
+                    background-color: #3d3d3d;
+                    border-radius: 4px;
+                    padding: 5px;
+                    font-size: 11px;
+                }
+            """)
+            
+            layout.addWidget(label)
+            self.stages[key] = label
+            
+            # arrow between stages
+            if i < len(stage_names) - 1:
+                arrow = QLabel("→")
+                arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                arrow.setFixedWidth(20)
+                layout.addWidget(arrow)
+        
+        layout.addStretch()
+    
+    def update_stage(self, stage: PipelineStage, status):
+        """
+        update stage visual state
+        """
+        if stage not in self.stages:
+            return
+        
+        label = self.stages[stage]
+        
+        if status is None:
+            # idle
+            label.setStyleSheet("""
+                QLabel {
+                    background-color: #3d3d3d;
+                    border-radius: 4px;
+                    padding: 5px;
+                    font-size: 11px;
+                }
+            """)
+        elif status.is_active:
+            # active
+            label.setStyleSheet("""
+                QLabel {
+                    background-color: #0078d4;
+                    border-radius: 4px;
+                    padding: 5px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+            """)
+        elif status.is_complete:
+            # complete
+            label.setStyleSheet("""
+                QLabel {
+                    background-color: #4caf50;
+                    border-radius: 4px;
+                    padding: 5px;
+                    font-size: 11px;
+                }
+            """)
+        elif status.error:
+            # error
+            label.setStyleSheet("""
+                QLabel {
+                    background-color: #f44336;
+                    border-radius: 4px;
+                    padding: 5px;
+                    font-size: 11px;
+                }
+            """)
+    
+    def update_progress(self, stage: PipelineStage, progress: float):
+        """
+        update stage progress
+        """
+        pass
