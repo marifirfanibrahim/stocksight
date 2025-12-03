@@ -207,6 +207,19 @@ def validate_columns(df: pd.DataFrame) -> Tuple[bool, str]:
     return True, "Validation passed"
 
 
+def validate_mapped_columns(df: pd.DataFrame) -> Tuple[bool, str]:
+    """
+    validate dataframe has mapped columns
+    """
+    required = ['Date', 'SKU', 'Quantity']
+    missing = [col for col in required if col not in df.columns]
+    
+    if missing:
+        return False, f"Missing mapped columns: {missing}"
+    
+    return True, "Mapped columns valid"
+
+
 def validate_data_types(df: pd.DataFrame) -> Tuple[bool, str]:
     """
     check data types are correct
@@ -242,9 +255,10 @@ def validate_data_quality(df: pd.DataFrame) -> Dict:
                 warnings.append(f"{col}: {missing_pct:.1f}% missing")
     
     # check duplicates
-    dup_count = df.duplicated(subset=['Date', 'SKU']).sum()
-    if dup_count > 0:
-        warnings.append(f"{dup_count} duplicate Date-SKU combinations")
+    if 'Date' in df.columns and 'SKU' in df.columns:
+        dup_count = df.duplicated(subset=['Date', 'SKU']).sum()
+        if dup_count > 0:
+            warnings.append(f"{dup_count} duplicate Date-SKU combinations")
     
     # check data length
     if len(df) < DataConfig.MIN_DATA_POINTS:
@@ -265,6 +279,65 @@ def validate_data_quality(df: pd.DataFrame) -> Dict:
     }
 
 
+def validate_raw_data(df: pd.DataFrame) -> Dict:
+    """
+    validate raw data before column mapping
+    """
+    result = {
+        'valid': True,
+        'issues': [],
+        'warnings': [],
+        'row_count': len(df),
+        'column_count': len(df.columns),
+        'columns': df.columns.tolist()
+    }
+    
+    # check empty
+    if len(df) == 0:
+        result['valid'] = False
+        result['issues'].append("Dataframe is empty")
+        return result
+    
+    # check minimum columns
+    if len(df.columns) < 3:
+        result['warnings'].append("Less than 3 columns detected")
+    
+    # check for missing values per column
+    for col in df.columns:
+        missing_pct = df[col].isna().sum() / len(df) * 100
+        if missing_pct > 50:
+            result['warnings'].append(f"{col}: {missing_pct:.1f}% missing values")
+    
+    # check for potential date columns
+    date_candidates = []
+    for col in df.columns:
+        try:
+            parsed = pd.to_datetime(df[col].head(10), errors='coerce')
+            if parsed.notna().sum() >= 5:
+                date_candidates.append(col)
+        except Exception:
+            pass
+    
+    result['date_candidates'] = date_candidates
+    
+    # check for potential numeric columns
+    numeric_candidates = []
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            numeric_candidates.append(col)
+        else:
+            try:
+                numeric = pd.to_numeric(df[col].head(20), errors='coerce')
+                if numeric.notna().sum() >= 10:
+                    numeric_candidates.append(col)
+            except Exception:
+                pass
+    
+    result['numeric_candidates'] = numeric_candidates
+    
+    return result
+
+
 # ================ DATA CLEANING ================
 
 def clean_dataframe(
@@ -273,16 +346,51 @@ def clean_dataframe(
 ) -> pd.DataFrame:
     """
     clean and standardize dataframe
+    legacy function for backward compatibility
     """
     from core.state import STATE
     
     df_clean = df.copy()
     
     # detect and store date format
-    if store_format:
+    if store_format and 'Date' in df_clean.columns:
         STATE.detected_date_format = detect_date_format(df_clean['Date'])
     
     # parse dates
+    if 'Date' in df_clean.columns:
+        df_clean['Date'] = parse_dates_flexible(df_clean['Date'])
+    
+    # convert quantity
+    if 'Quantity' in df_clean.columns:
+        df_clean['Quantity'] = pd.to_numeric(df_clean['Quantity'], errors='coerce')
+    
+    # remove invalid rows
+    if 'Date' in df_clean.columns and 'SKU' in df_clean.columns:
+        df_clean = df_clean.dropna(subset=['Date', 'SKU'])
+    
+    if 'Quantity' in df_clean.columns:
+        df_clean['Quantity'] = df_clean['Quantity'].fillna(0)
+    
+    # sort and deduplicate
+    if 'Date' in df_clean.columns:
+        df_clean = df_clean.sort_values('Date').reset_index(drop=True)
+    
+    if 'Date' in df_clean.columns and 'SKU' in df_clean.columns:
+        df_clean = df_clean.drop_duplicates(subset=['Date', 'SKU'], keep='last')
+    
+    return df_clean
+
+
+def clean_mapped_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    clean dataframe after column mapping applied
+    """
+    from core.state import STATE
+    
+    df_clean = df.copy()
+    
+    # parse dates
+    STATE.detected_date_format = detect_date_format(df_clean['Date'])
     df_clean['Date'] = parse_dates_flexible(df_clean['Date'])
     
     # convert quantity
@@ -297,6 +405,27 @@ def clean_dataframe(
     df_clean = df_clean.drop_duplicates(subset=['Date', 'SKU'], keep='last')
     
     return df_clean
+
+
+def clean_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    clean raw dataframe before column mapping
+    generic cleaning without requiring specific columns
+    """
+    df_clean = df.copy()
+    
+    # remove completely empty rows
+    df_clean = df_clean.dropna(how='all')
+    
+    # remove completely empty columns
+    df_clean = df_clean.dropna(axis=1, how='all')
+    
+    # strip whitespace from string columns
+    for col in df_clean.select_dtypes(include=['object']).columns:
+        df_clean[col] = df_clean[col].astype(str).str.strip()
+        df_clean[col] = df_clean[col].replace('nan', pd.NA)
+    
+    return df_clean.reset_index(drop=True)
 
 
 def prepare_for_autots(
@@ -406,6 +535,8 @@ def get_sku_list(df: pd.DataFrame) -> List[str]:
     """
     extract unique sku values
     """
+    if 'SKU' not in df.columns:
+        return []
     return sorted(df['SKU'].unique().tolist())
 
 
@@ -451,3 +582,42 @@ def get_data_summary(df: pd.DataFrame) -> Dict:
         }
     
     return summary
+
+
+def get_column_info(df: pd.DataFrame) -> List[Dict]:
+    """
+    get information about each column
+    """
+    info = []
+    
+    for col in df.columns:
+        col_info = {
+            'name': col,
+            'dtype': str(df[col].dtype),
+            'non_null': df[col].notna().sum(),
+            'null_count': df[col].isna().sum(),
+            'null_pct': df[col].isna().sum() / len(df) * 100,
+            'unique': df[col].nunique(),
+            'sample': df[col].dropna().head(3).tolist()
+        }
+        
+        # check if date-like
+        try:
+            parsed = pd.to_datetime(df[col].head(10), errors='coerce')
+            col_info['is_date_like'] = parsed.notna().sum() >= 5
+        except Exception:
+            col_info['is_date_like'] = False
+        
+        # check if numeric
+        if pd.api.types.is_numeric_dtype(df[col]):
+            col_info['is_numeric'] = True
+        else:
+            try:
+                numeric = pd.to_numeric(df[col].head(20), errors='coerce')
+                col_info['is_numeric'] = numeric.notna().sum() >= 10
+            except Exception:
+                col_info['is_numeric'] = False
+        
+        info.append(col_info)
+    
+    return info

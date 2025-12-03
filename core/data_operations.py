@@ -15,14 +15,15 @@ from typing import Tuple, Dict, List, Optional
 from config import Paths, ExportConfig, DataConfig
 from core.state import STATE
 from utils.preprocessing import (
-    validate_columns,
+    validate_mapped_columns,
     validate_data_types,
-    clean_dataframe,
+    clean_mapped_dataframe,
     prepare_for_autots,
     get_sku_list,
     aggregate_by_period,
     group_forecast_by_period,
-    get_data_summary
+    get_data_summary,
+    parse_dates_flexible
 )
 from utils.features import (
     detect_additional_columns,
@@ -55,15 +56,15 @@ def set_output_directory(path: str):
     os.makedirs(path, exist_ok=True)
 
 
-# ================ DATA LOADING ================
+# ================ RAW DATA LOADING ================
 
-def load_csv_file(file_path: str) -> Tuple[bool, str]:
+def load_csv_raw(file_path: str) -> Tuple[bool, str]:
     """
-    load and process csv file
+    load csv file without column validation
     """
     try:
         df = pd.read_csv(file_path)
-        return process_dataframe(df, file_path)
+        return _store_raw_data(df, file_path)
         
     except Exception as e:
         print(f"load error: {e}")
@@ -72,9 +73,9 @@ def load_csv_file(file_path: str) -> Tuple[bool, str]:
         return False, f"Error loading file: {str(e)}"
 
 
-def load_excel_file(file_path: str, sheet_name: str = None) -> Tuple[bool, str]:
+def load_excel_raw(file_path: str, sheet_name: str = None) -> Tuple[bool, str]:
     """
-    load and process excel file
+    load excel file without column validation
     """
     try:
         if sheet_name:
@@ -82,13 +83,41 @@ def load_excel_file(file_path: str, sheet_name: str = None) -> Tuple[bool, str]:
         else:
             df = pd.read_excel(file_path)
         
-        return process_dataframe(df, file_path)
+        return _store_raw_data(df, file_path)
         
     except Exception as e:
         print(f"load error: {e}")
         import traceback
         traceback.print_exc()
         return False, f"Error loading file: {str(e)}"
+
+
+def _store_raw_data(df: pd.DataFrame, source: str) -> Tuple[bool, str]:
+    """
+    store raw data in state
+    """
+    try:
+        if len(df) == 0:
+            return False, "File is empty"
+        
+        if len(df.columns) < 2:
+            return False, "File must have at least 2 columns"
+        
+        # store raw data
+        STATE.set_raw_data(df)
+        
+        # log summary
+        print(f"loaded raw data: {source}")
+        print(f"rows: {len(df)}, columns: {len(df.columns)}")
+        print(f"columns: {df.columns.tolist()}")
+        
+        return True, f"Loaded: {len(df):,} rows, {len(df.columns)} columns"
+        
+    except Exception as e:
+        print(f"store error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, f"Error storing data: {str(e)}"
 
 
 def get_excel_sheets(file_path: str) -> List[str]:
@@ -103,50 +132,176 @@ def get_excel_sheets(file_path: str) -> List[str]:
         return []
 
 
-def process_dataframe(df: pd.DataFrame, source: str = "") -> Tuple[bool, str]:
+# ================ COLUMN MAPPING ================
+
+def apply_column_mapping(mapping: Dict) -> Tuple[bool, str]:
     """
-    process loaded dataframe
+    apply column mapping to raw data
     """
     try:
-        # validate columns
-        valid, msg = validate_columns(df)
-        if not valid:
-            return False, f"Error: {msg}"
+        if STATE.raw_data is None:
+            return False, "No data loaded"
         
-        # validate types
-        valid, msg = validate_data_types(df)
-        if not valid:
-            return False, f"Error: {msg}"
+        date_col = mapping.get('date_column')
+        sku_col = mapping.get('sku_column')
+        quantity_col = mapping.get('quantity_column')
+        additional_cols = mapping.get('additional_columns', [])
         
-        # store raw data
-        STATE.raw_data = df.copy()
+        # validate columns exist
+        missing = []
+        for col in [date_col, sku_col, quantity_col]:
+            if col not in STATE.raw_data.columns:
+                missing.append(col)
         
-        # clean and store
-        STATE.clean_data = clean_dataframe(df, store_format=True)
-        STATE.sku_list = get_sku_list(STATE.clean_data)
+        if missing:
+            return False, f"Columns not found: {missing}"
         
-        # detect additional columns
-        STATE.additional_columns = detect_additional_columns(STATE.clean_data)
+        # build rename map
+        rename_map = {
+            date_col: 'Date',
+            sku_col: 'SKU',
+            quantity_col: 'Quantity'
+        }
         
-        if STATE.additional_columns:
-            print(f"detected additional columns: {STATE.additional_columns}")
+        # select and rename columns
+        columns_to_keep = [date_col, sku_col, quantity_col] + additional_cols
+        columns_to_keep = [c for c in columns_to_keep if c in STATE.raw_data.columns]
+        
+        df = STATE.raw_data[columns_to_keep].copy()
+        df = df.rename(columns=rename_map)
+        
+        # store mapping in state
+        STATE.set_column_mapping(
+            date_column=date_col,
+            sku_column=sku_col,
+            quantity_column=quantity_col,
+            additional_columns=additional_cols
+        )
+        
+        # clean and validate
+        df = clean_mapped_dataframe(df)
+        
+        # store cleaned data
+        STATE.clean_data = df
+        STATE.sku_list = get_sku_list(df)
+        STATE.additional_columns = additional_cols
         
         # analyze seasonality
-        STATE.seasonality_info = detect_seasonality_pattern(STATE.clean_data)
-        print(f"seasonality: monthly={STATE.seasonality_info['has_monthly_seasonality']}, weekly={STATE.seasonality_info['has_weekly_seasonality']}")
+        STATE.seasonality_info = detect_seasonality_pattern(df)
         
-        # log summary
-        print(f"loaded {source}")
-        print(f"records: {len(STATE.clean_data)}, skus: {len(STATE.sku_list)}")
+        print(f"mapping applied: {len(df)} records, {len(STATE.sku_list)} skus")
         
-        feature_count = len(STATE.additional_columns)
-        return True, f"Loaded: {len(STATE.clean_data)} records, {len(STATE.sku_list)} SKUs, {feature_count} features"
+        return True, f"Mapping applied: {len(df):,} records, {len(STATE.sku_list)} SKUs"
         
     except Exception as e:
-        print(f"process error: {e}")
+        print(f"mapping error: {e}")
         import traceback
         traceback.print_exc()
-        return False, f"Error processing data: {str(e)}"
+        return False, f"Error applying mapping: {str(e)}"
+
+
+def clear_column_mapping():
+    """
+    clear current column mapping
+    """
+    STATE.clear_column_mapping()
+    STATE.reset_after_mapping_change()
+    print("column mapping cleared")
+
+
+# ================ LEGACY SUPPORT ================
+
+def load_csv_file(file_path: str) -> Tuple[bool, str]:
+    """
+    load csv file - legacy function
+    attempts auto-detection of columns
+    """
+    success, msg = load_csv_raw(file_path)
+    
+    if not success:
+        return success, msg
+    
+    # try to auto-detect and map columns
+    mapping = auto_detect_columns(STATE.raw_data)
+    
+    if mapping:
+        return apply_column_mapping(mapping)
+    
+    return True, msg
+
+
+def load_excel_file(file_path: str, sheet_name: str = None) -> Tuple[bool, str]:
+    """
+    load excel file - legacy function
+    """
+    success, msg = load_excel_raw(file_path, sheet_name)
+    
+    if not success:
+        return success, msg
+    
+    # try to auto-detect and map columns
+    mapping = auto_detect_columns(STATE.raw_data)
+    
+    if mapping:
+        return apply_column_mapping(mapping)
+    
+    return True, msg
+
+
+def auto_detect_columns(df: pd.DataFrame) -> Optional[Dict]:
+    """
+    auto-detect date, sku, quantity columns
+    returns mapping dict if successful, none otherwise
+    """
+    # check if already named correctly
+    if all(c in df.columns for c in ['Date', 'SKU', 'Quantity']):
+        return {
+            'date_column': 'Date',
+            'sku_column': 'SKU',
+            'quantity_column': 'Quantity',
+            'additional_columns': [c for c in df.columns if c not in ['Date', 'SKU', 'Quantity']]
+        }
+    
+    # try keyword matching
+    date_keywords = ['date', 'time', 'timestamp', 'day', 'period']
+    sku_keywords = ['sku', 'product', 'item', 'code', 'article', 'name', 'id']
+    qty_keywords = ['quantity', 'qty', 'amount', 'count', 'units', 'sales', 'demand']
+    
+    date_col = None
+    sku_col = None
+    qty_col = None
+    
+    for col in df.columns:
+        col_lower = col.lower().strip()
+        
+        if date_col is None:
+            for kw in date_keywords:
+                if kw in col_lower:
+                    date_col = col
+                    break
+        
+        if sku_col is None:
+            for kw in sku_keywords:
+                if kw in col_lower:
+                    sku_col = col
+                    break
+        
+        if qty_col is None:
+            for kw in qty_keywords:
+                if kw in col_lower:
+                    qty_col = col
+                    break
+    
+    if date_col and sku_col and qty_col:
+        additional = [c for c in df.columns if c not in [date_col, sku_col, qty_col]]
+        return {
+            'date_column': date_col,
+            'sku_column': sku_col,
+            'quantity_column': qty_col,
+            'additional_columns': additional
+        }
+    
+    return None
 
 
 # ================ DATA CLEARING ================
@@ -173,6 +328,9 @@ def validate_forecast_requirements() -> Tuple[bool, str]:
     """
     check if data meets forecast requirements
     """
+    if not STATE.is_columns_mapped():
+        return False, "Columns not mapped. Configure column mapping first."
+    
     if STATE.clean_data is None:
         return False, "No data loaded"
     
@@ -195,20 +353,30 @@ def get_data_validation_report() -> Dict:
     """
     get comprehensive data validation report
     """
-    if STATE.clean_data is None:
-        return {'valid': False, 'message': 'No data loaded'}
-    
-    from utils.preprocessing import validate_data_quality
-    
-    validation = validate_data_quality(STATE.clean_data)
-    summary = get_data_summary(STATE.clean_data)
-    
-    return {
-        'valid': validation['valid'],
-        'issues': validation['issues'],
-        'warnings': validation['warnings'],
-        'summary': summary
+    result = {
+        'has_raw_data': STATE.raw_data is not None,
+        'is_mapped': STATE.is_columns_mapped(),
+        'has_clean_data': STATE.clean_data is not None,
+        'raw_rows': len(STATE.raw_data) if STATE.raw_data is not None else 0,
+        'raw_columns': len(STATE.raw_columns),
+        'column_names': STATE.raw_columns,
+        'mapping': STATE.get_column_mapping()
     }
+    
+    if STATE.clean_data is not None:
+        from utils.preprocessing import validate_data_quality
+        
+        validation = validate_data_quality(STATE.clean_data)
+        summary = get_data_summary(STATE.clean_data)
+        
+        result.update({
+            'valid': validation['valid'],
+            'issues': validation['issues'],
+            'warnings': validation['warnings'],
+            'summary': summary
+        })
+    
+    return result
 
 
 # ================ DASHBOARD DATA ================

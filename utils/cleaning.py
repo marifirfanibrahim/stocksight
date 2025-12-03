@@ -1,6 +1,6 @@
 """
 data cleaning utilities
-configurable cleaning strategies with rollback
+generic cleaning strategies with rollback
 """
 
 
@@ -50,7 +50,7 @@ class OutlierMethod(Enum):
     NONE = 'none'
 
 
-# ================ CLEANING OPERATIONS ================
+# ================ GENERIC CLEANING OPERATIONS ================
 
 def impute_missing(
     df: pd.DataFrame,
@@ -60,17 +60,23 @@ def impute_missing(
 ) -> pd.DataFrame:
     """
     impute missing values in column
+    works on any dataframe
     """
     if save_state:
         STATE.save_cleaning_state('impute', f"Impute {column} using {method.value}")
     
     df_clean = df.copy()
     
+    if column not in df_clean.columns:
+        return df_clean
+    
     if method == ImputationMethod.MEAN:
-        df_clean[column] = df_clean[column].fillna(df_clean[column].mean())
+        if pd.api.types.is_numeric_dtype(df_clean[column]):
+            df_clean[column] = df_clean[column].fillna(df_clean[column].mean())
     
     elif method == ImputationMethod.MEDIAN:
-        df_clean[column] = df_clean[column].fillna(df_clean[column].median())
+        if pd.api.types.is_numeric_dtype(df_clean[column]):
+            df_clean[column] = df_clean[column].fillna(df_clean[column].median())
     
     elif method == ImputationMethod.MODE:
         mode_val = df_clean[column].mode()
@@ -84,7 +90,8 @@ def impute_missing(
         df_clean[column] = df_clean[column].bfill()
     
     elif method == ImputationMethod.INTERPOLATE:
-        df_clean[column] = df_clean[column].interpolate(method='linear')
+        if pd.api.types.is_numeric_dtype(df_clean[column]):
+            df_clean[column] = df_clean[column].interpolate(method='linear')
     
     elif method == ImputationMethod.ZERO:
         df_clean[column] = df_clean[column].fillna(0)
@@ -102,7 +109,8 @@ def impute_all_missing(
     save_state: bool = True
 ) -> pd.DataFrame:
     """
-    impute all missing values
+    impute all missing values in dataframe
+    works on any dataframe
     """
     if save_state:
         STATE.save_cleaning_state('impute_all', f"Impute all: numeric={numeric_method.value}, categorical={categorical_method.value}")
@@ -129,11 +137,18 @@ def handle_duplicates(
 ) -> pd.DataFrame:
     """
     handle duplicate rows
+    works on any dataframe
     """
     if save_state:
         STATE.save_cleaning_state('duplicates', f"Handle duplicates using {method.value}")
     
     df_clean = df.copy()
+    
+    # validate subset columns exist
+    if subset:
+        subset = [col for col in subset if col in df_clean.columns]
+        if not subset:
+            subset = None
     
     if method == DuplicateMethod.KEEP_FIRST:
         df_clean = df_clean.drop_duplicates(subset=subset, keep='first')
@@ -156,6 +171,7 @@ def handle_outliers(
 ) -> pd.DataFrame:
     """
     handle outliers in numeric column
+    works on any dataframe
     """
     if threshold is None:
         threshold = CleaningConfig.OUTLIER_STD_THRESHOLD
@@ -165,11 +181,17 @@ def handle_outliers(
     
     df_clean = df.copy()
     
+    if column not in df_clean.columns:
+        return df_clean
+    
     if not pd.api.types.is_numeric_dtype(df_clean[column]):
         return df_clean
     
     mean = df_clean[column].mean()
     std = df_clean[column].std()
+    
+    if std == 0:
+        return df_clean
     
     lower_bound = mean - threshold * std
     upper_bound = mean + threshold * std
@@ -182,7 +204,6 @@ def handle_outliers(
         df_clean = df_clean[mask]
     
     elif method == OutlierMethod.WINSORIZE:
-        # winsorize at 5th and 95th percentile
         lower_pct = df_clean[column].quantile(0.05)
         upper_pct = df_clean[column].quantile(0.95)
         df_clean[column] = df_clean[column].clip(lower=lower_pct, upper=upper_pct)
@@ -194,18 +215,23 @@ def handle_all_outliers(
     df: pd.DataFrame,
     method: OutlierMethod = OutlierMethod.CLIP,
     threshold: float = None,
+    exclude_columns: List[str] = None,
     save_state: bool = True
 ) -> pd.DataFrame:
     """
     handle outliers in all numeric columns
+    works on any dataframe
     """
     if save_state:
         STATE.save_cleaning_state('outliers_all', f"Handle all outliers using {method.value}")
     
+    if exclude_columns is None:
+        exclude_columns = []
+    
     df_clean = df.copy()
     
     for column in df_clean.select_dtypes(include=[np.number]).columns:
-        if column.lower() in ['date', 'id', 'index']:
+        if column in exclude_columns:
             continue
         df_clean = handle_outliers(df_clean, column, method, threshold, save_state=False)
     
@@ -217,6 +243,7 @@ def handle_all_outliers(
 def get_missing_summary(df: pd.DataFrame) -> Dict[str, Dict]:
     """
     get summary of missing values
+    works on any dataframe
     """
     summary = {}
     
@@ -226,9 +253,9 @@ def get_missing_summary(df: pd.DataFrame) -> Dict[str, Dict]:
         missing_pct = (missing_count / total_count) * 100 if total_count > 0 else 0
         
         summary[column] = {
-            'missing_count': missing_count,
-            'total_count': total_count,
-            'missing_pct': missing_pct,
+            'missing_count': int(missing_count),
+            'total_count': int(total_count),
+            'missing_pct': float(missing_pct),
             'has_missing': missing_count > 0
         }
     
@@ -238,22 +265,30 @@ def get_missing_summary(df: pd.DataFrame) -> Dict[str, Dict]:
 def get_duplicate_summary(df: pd.DataFrame, subset: List[str] = None) -> Dict:
     """
     get summary of duplicates
+    works on any dataframe
     """
+    # validate subset
+    if subset:
+        subset = [col for col in subset if col in df.columns]
+        if not subset:
+            subset = None
+    
     total = len(df)
     duplicates = df.duplicated(subset=subset, keep=False).sum()
     unique = total - duplicates
     
     return {
-        'total_rows': total,
-        'duplicate_rows': duplicates,
-        'unique_rows': unique,
-        'duplicate_pct': (duplicates / total) * 100 if total > 0 else 0
+        'total_rows': int(total),
+        'duplicate_rows': int(duplicates),
+        'unique_rows': int(unique),
+        'duplicate_pct': float((duplicates / total) * 100) if total > 0 else 0
     }
 
 
 def get_outlier_summary(df: pd.DataFrame, threshold: float = None) -> Dict[str, Dict]:
     """
-    get summary of outliers
+    get summary of outliers in numeric columns
+    works on any dataframe
     """
     if threshold is None:
         threshold = CleaningConfig.OUTLIER_STD_THRESHOLD
@@ -269,8 +304,8 @@ def get_outlier_summary(df: pd.DataFrame, threshold: float = None) -> Dict[str, 
                 'outlier_count': 0,
                 'total_count': len(df),
                 'outlier_pct': 0,
-                'lower_bound': mean,
-                'upper_bound': mean
+                'lower_bound': float(mean),
+                'upper_bound': float(mean)
             }
             continue
         
@@ -281,13 +316,13 @@ def get_outlier_summary(df: pd.DataFrame, threshold: float = None) -> Dict[str, 
         outlier_count = outlier_mask.sum()
         
         summary[column] = {
-            'outlier_count': outlier_count,
+            'outlier_count': int(outlier_count),
             'total_count': len(df),
-            'outlier_pct': (outlier_count / len(df)) * 100 if len(df) > 0 else 0,
-            'lower_bound': lower_bound,
-            'upper_bound': upper_bound,
-            'mean': mean,
-            'std': std
+            'outlier_pct': float((outlier_count / len(df)) * 100) if len(df) > 0 else 0,
+            'lower_bound': float(lower_bound),
+            'upper_bound': float(upper_bound),
+            'mean': float(mean),
+            'std': float(std)
         }
     
     return summary
@@ -300,10 +335,12 @@ def clean_dataframe(
     imputation_method: ImputationMethod = ImputationMethod.FORWARD_FILL,
     duplicate_method: DuplicateMethod = DuplicateMethod.KEEP_LAST,
     outlier_method: OutlierMethod = OutlierMethod.CLIP,
+    duplicate_subset: List[str] = None,
     save_state: bool = True
 ) -> pd.DataFrame:
     """
     apply comprehensive cleaning
+    works on any dataframe
     """
     if save_state:
         STATE.save_cleaning_state('clean_all', "Comprehensive cleaning applied")
@@ -311,7 +348,7 @@ def clean_dataframe(
     df_clean = df.copy()
     
     # handle duplicates first
-    df_clean = handle_duplicates(df_clean, method=duplicate_method, save_state=False)
+    df_clean = handle_duplicates(df_clean, subset=duplicate_subset, method=duplicate_method, save_state=False)
     
     # impute missing
     df_clean = impute_all_missing(df_clean, numeric_method=imputation_method, save_state=False)
@@ -326,6 +363,7 @@ def clean_dataframe(
 def get_cleaning_recommendations(df: pd.DataFrame) -> List[Dict]:
     """
     get cleaning recommendations based on data analysis
+    works on any dataframe
     """
     recommendations = []
     
@@ -339,12 +377,14 @@ def get_cleaning_recommendations(df: pd.DataFrame) -> List[Dict]:
             if info['missing_pct'] > 20:
                 severity = 'high'
             
+            suggestion = 'forward_fill' if pd.api.types.is_numeric_dtype(df[column]) else 'mode'
+            
             recommendations.append({
                 'type': 'missing',
                 'column': column,
                 'severity': severity,
                 'message': f"{column}: {info['missing_pct']:.1f}% missing ({info['missing_count']} values)",
-                'suggestion': 'forward_fill' if pd.api.types.is_numeric_dtype(df[column]) else 'mode'
+                'suggestion': suggestion
             })
     
     # check duplicates

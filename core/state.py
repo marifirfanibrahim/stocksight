@@ -81,6 +81,18 @@ class Alert:
     related_skus: List[str] = field(default_factory=list)
 
 
+@dataclass
+class ColumnMapping:
+    """
+    column mapping configuration
+    """
+    date_column: str = ""
+    sku_column: str = ""
+    quantity_column: str = ""
+    additional_columns: List[str] = field(default_factory=list)
+    is_mapped: bool = False
+
+
 # ================ GLOBAL STATE ================
 
 class AppState:
@@ -98,14 +110,17 @@ class AppState:
         self.clean_data = None
         self.original_data = None
         
+        # ---------- COLUMN MAPPING ----------
+        self.column_mapping = ColumnMapping()
+        self.raw_columns = []
+        self.detected_date_format = '%Y-%m-%d'
+        
         # ---------- SKU DATA ----------
         self.sku_list = []
         self.selected_skus = []
         
-        # ---------- COLUMN MAPPING ----------
-        self.column_mapping = {}
+        # ---------- ADDITIONAL COLUMNS ----------
         self.additional_columns = []
-        self.detected_date_format = '%Y-%m-%d'
         
         # ---------- PROFILING ----------
         self.profile_report = None
@@ -172,7 +187,67 @@ class AppState:
             'api_endpoints': {}
         }
     
+    # ================ COLUMN MAPPING ================
+    
+    def set_column_mapping(
+        self,
+        date_column: str,
+        sku_column: str,
+        quantity_column: str,
+        additional_columns: List[str] = None
+    ):
+        """
+        set column mapping configuration
+        """
+        with self._lock:
+            self.column_mapping = ColumnMapping(
+                date_column=date_column,
+                sku_column=sku_column,
+                quantity_column=quantity_column,
+                additional_columns=additional_columns or [],
+                is_mapped=True
+            )
+            self.additional_columns = additional_columns or []
+    
+    def clear_column_mapping(self):
+        """
+        clear column mapping
+        """
+        with self._lock:
+            self.column_mapping = ColumnMapping()
+            self.additional_columns = []
+    
+    def is_columns_mapped(self) -> bool:
+        """
+        check if columns are mapped
+        """
+        return self.column_mapping.is_mapped
+    
+    def get_column_mapping(self) -> Dict:
+        """
+        get column mapping as dict
+        """
+        with self._lock:
+            return {
+                'date_column': self.column_mapping.date_column,
+                'sku_column': self.column_mapping.sku_column,
+                'quantity_column': self.column_mapping.quantity_column,
+                'additional_columns': self.column_mapping.additional_columns,
+                'is_mapped': self.column_mapping.is_mapped
+            }
+    
     # ================ THREAD SAFE OPERATIONS ================
+    
+    def set_raw_data(self, raw_data):
+        """
+        set raw data before mapping
+        """
+        with self._lock:
+            self.raw_data = raw_data
+            self.original_data = raw_data.copy()
+            self.raw_columns = raw_data.columns.tolist()
+            self.clean_data = None
+            self.column_mapping = ColumnMapping()
     
     def set_data(self, raw_data, clean_data=None):
         """
@@ -182,8 +257,9 @@ class AppState:
             self.raw_data = raw_data
             self.clean_data = clean_data if clean_data is not None else raw_data.copy()
             self.original_data = raw_data.copy()
+            self.raw_columns = raw_data.columns.tolist()
             
-            if 'SKU' in self.clean_data.columns:
+            if self.clean_data is not None and 'SKU' in self.clean_data.columns:
                 self.sku_list = sorted(self.clean_data['SKU'].unique().tolist())
     
     def get_data(self):
@@ -192,6 +268,13 @@ class AppState:
         """
         with self._lock:
             return self.clean_data.copy() if self.clean_data is not None else None
+    
+    def get_raw_data(self):
+        """
+        get raw unmapped data
+        """
+        with self._lock:
+            return self.raw_data.copy() if self.raw_data is not None else None
     
     # ================ PIPELINE CONTROL ================
     
@@ -234,6 +317,12 @@ class AppState:
                 self.pipeline_stage = stage_order[current_index + 1]
                 self.pipeline_progress = 0.0
     
+    def can_proceed_to_exploration(self) -> bool:
+        """
+        check if can proceed to exploration
+        """
+        return self.column_mapping.is_mapped and self.clean_data is not None
+    
     # ================ CLEANING HISTORY ================
     
     def save_cleaning_state(self, operation: str, description: str):
@@ -245,12 +334,15 @@ class AppState:
             if self.current_cleaning_index < len(self.cleaning_history) - 1:
                 self.cleaning_history = self.cleaning_history[:self.current_cleaning_index + 1]
             
+            # use raw_data if clean_data not available
+            data_to_save = self.clean_data if self.clean_data is not None else self.raw_data
+            
             state = CleaningState(
                 timestamp=datetime.now(),
                 operation=operation,
                 description=description,
-                data_snapshot=self.clean_data.copy() if self.clean_data is not None else None,
-                rows_affected=len(self.clean_data) if self.clean_data is not None else 0
+                data_snapshot=data_to_save.copy() if data_to_save is not None else None,
+                rows_affected=len(data_to_save) if data_to_save is not None else 0
             )
             
             self.cleaning_history.append(state)
@@ -272,7 +364,11 @@ class AppState:
             if target_index < len(self.cleaning_history):
                 state = self.cleaning_history[target_index]
                 if state.data_snapshot is not None:
-                    self.clean_data = state.data_snapshot.copy()
+                    # restore to appropriate place
+                    if self.column_mapping.is_mapped:
+                        self.clean_data = state.data_snapshot.copy()
+                    else:
+                        self.raw_data = state.data_snapshot.copy()
                     self.current_cleaning_index = target_index
                     return True
             
@@ -288,7 +384,10 @@ class AppState:
             if target_index < len(self.cleaning_history):
                 state = self.cleaning_history[target_index]
                 if state.data_snapshot is not None:
-                    self.clean_data = state.data_snapshot.copy()
+                    if self.column_mapping.is_mapped:
+                        self.clean_data = state.data_snapshot.copy()
+                    else:
+                        self.raw_data = state.data_snapshot.copy()
                     self.current_cleaning_index = target_index
                     return True
             
@@ -457,6 +556,18 @@ class AppState:
             self.selected_features = []
             self.available_features = []
             self.feature_extraction_complete = False
+    
+    def reset_after_mapping_change(self):
+        """
+        reset states that depend on column mapping
+        """
+        with self._lock:
+            self.clean_data = None
+            self.sku_list = []
+            self.reset_forecast()
+            self.reset_features()
+            self.anomalies = {}
+            self.exploration_charts = {}
 
 
 # ================ SINGLETON INSTANCE ================

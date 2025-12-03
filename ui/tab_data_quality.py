@@ -1,6 +1,6 @@
 """
 data quality tab with ydata profiling
-upload, profile, clean, export
+upload, profile, clean, configure columns
 """
 
 
@@ -25,14 +25,17 @@ from config import Paths, ProfilingConfig, CleaningConfig
 from core.state import STATE
 from core.profiling import PROFILER
 from core.pipeline import PIPELINE, PipelineStage
-from core.data_operations import load_csv_file, load_excel_file, get_excel_sheets
+from core.data_operations import (
+    load_file, get_excel_sheets, configure_columns,
+    get_column_suggestions, is_columns_configured
+)
 from utils.cleaning import (
     get_missing_summary, get_duplicate_summary, get_outlier_summary,
     get_cleaning_recommendations, impute_missing, handle_duplicates,
-    handle_outliers, clean_dataframe, rollback, redo,
+    handle_outliers, clean_dataframe, rollback, redo, can_rollback, can_redo,
     ImputationMethod, DuplicateMethod, OutlierMethod
 )
-from utils.preprocessing import detect_data_format, convert_wide_to_long
+from utils.preprocessing import get_dataframe_info, get_column_analysis
 
 
 # ================ WORKER THREAD ================
@@ -76,6 +79,7 @@ class DataQualityTab(QWidget):
     """
     
     data_loaded = pyqtSignal()
+    columns_configured = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -139,6 +143,28 @@ class DataQualityTab(QWidget):
         data_layout.addWidget(self.lbl_data_stats)
         
         layout.addWidget(data_group)
+        
+        # ---------- COLUMN CONFIGURATION ----------
+        config_group = QGroupBox("Column Configuration")
+        config_layout = QVBoxLayout(config_group)
+        
+        # status
+        self.lbl_config_status = QLabel("Upload data first")
+        self.lbl_config_status.setStyleSheet("color: gray;")
+        config_layout.addWidget(self.lbl_config_status)
+        
+        # configure button
+        self.btn_configure = QPushButton("Configure Columns")
+        self.btn_configure.setEnabled(False)
+        config_layout.addWidget(self.btn_configure)
+        
+        # configured columns display
+        self.lbl_configured_cols = QLabel("")
+        self.lbl_configured_cols.setWordWrap(True)
+        self.lbl_configured_cols.setStyleSheet("font-size: 10px;")
+        config_layout.addWidget(self.lbl_configured_cols)
+        
+        layout.addWidget(config_group)
         
         # ---------- PROFILING SECTION ----------
         profile_group = QGroupBox("Profiling")
@@ -334,6 +360,7 @@ class DataQualityTab(QWidget):
         connect widget signals
         """
         self.btn_upload.clicked.connect(self._on_upload_clicked)
+        self.btn_configure.clicked.connect(self._on_configure_clicked)
         self.btn_profile.clicked.connect(self._on_profile_clicked)
         self.btn_export_report.clicked.connect(self._on_export_report)
         self.btn_clean.clicked.connect(self._on_clean_clicked)
@@ -356,11 +383,67 @@ class DataQualityTab(QWidget):
         if file_path:
             self.load_file(file_path)
     
+    def _on_configure_clicked(self):
+        """
+        handle configure columns button
+        """
+        if STATE.raw_data is None:
+            return
+        
+        from ui.dialogs.sheet_dialog import ColumnMapperDialog
+        
+        dialog = ColumnMapperDialog(self, STATE.raw_data)
+        
+        if dialog.exec():
+            # get mapping from dialog
+            date_col = dialog.combo_date.currentText()
+            sku_col = dialog.combo_sku.currentText()
+            qty_col = dialog.combo_qty.currentText()
+            additional = dialog.additional_columns
+            
+            # apply configuration
+            success, message = configure_columns(date_col, sku_col, qty_col, additional)
+            
+            if success:
+                self._on_columns_configured()
+                if self.main_window:
+                    self.main_window.set_status(message)
+            else:
+                QMessageBox.warning(self, "Configuration Error", message)
+                if self.main_window:
+                    self.main_window.set_status(message, True)
+    
+    def _on_columns_configured(self):
+        """
+        handle successful column configuration
+        """
+        # update status
+        self.lbl_config_status.setText("✓ Columns configured")
+        self.lbl_config_status.setStyleSheet("color: #4caf50;")
+        
+        # show mapping
+        mapping = STATE.column_mapping
+        cols_text = f"Date: {mapping.get('date', '?')}\n"
+        cols_text += f"SKU: {mapping.get('sku', '?')}\n"
+        cols_text += f"Quantity: {mapping.get('quantity', '?')}"
+        if STATE.additional_columns:
+            cols_text += f"\n+{len(STATE.additional_columns)} additional"
+        self.lbl_configured_cols.setText(cols_text)
+        
+        # update stats with clean data
+        self._update_data_display()
+        
+        # emit signal
+        self.columns_configured.emit()
+    
     def _on_profile_clicked(self):
         """
         handle profile button click
         """
-        if STATE.clean_data is None:
+        # profile raw data (before column configuration)
+        df_to_profile = STATE.raw_data
+        
+        if df_to_profile is None:
             return
         
         # disable button
@@ -371,7 +454,7 @@ class DataQualityTab(QWidget):
         
         # start worker
         self._worker = ProfilingWorker(
-            df=STATE.clean_data,
+            df=df_to_profile,
             minimal=self.chk_minimal.isChecked()
         )
         self._worker.progress.connect(self._on_profile_progress)
@@ -425,7 +508,8 @@ class DataQualityTab(QWidget):
         """
         handle clean button click
         """
-        if STATE.clean_data is None:
+        # clean raw data
+        if STATE.raw_data is None:
             return
         
         # get selected methods
@@ -434,14 +518,23 @@ class DataQualityTab(QWidget):
         out_method = self._get_outlier_method()
         
         try:
-            # apply cleaning
-            STATE.clean_data = clean_dataframe(
-                STATE.clean_data,
+            # apply cleaning to raw data
+            STATE.raw_data = clean_dataframe(
+                STATE.raw_data,
                 imputation_method=imp_method,
                 duplicate_method=dup_method,
                 outlier_method=out_method,
                 save_state=True
             )
+            
+            # if columns were configured, re-apply configuration
+            if is_columns_configured() and STATE.column_mapping:
+                configure_columns(
+                    STATE.column_mapping['date'],
+                    STATE.column_mapping['sku'],
+                    STATE.column_mapping['quantity'],
+                    STATE.additional_columns
+                )
             
             self._update_data_display()
             self._update_undo_redo_buttons()
@@ -486,13 +579,10 @@ class DataQualityTab(QWidget):
             self.main_window.show_progress(10, "Loading file...")
         
         try:
-            # load based on extension
             ext = path.suffix.lower()
             
-            if ext == '.csv':
-                success, message = load_csv_file(file_path)
-            elif ext in ['.xlsx', '.xls']:
-                # check for multiple sheets
+            # check for multiple sheets
+            if ext in ['.xlsx', '.xls']:
                 sheets = get_excel_sheets(file_path)
                 
                 if len(sheets) > 1:
@@ -500,20 +590,19 @@ class DataQualityTab(QWidget):
                     dialog = SheetSelectionDialog(self, sheets)
                     if dialog.exec():
                         sheet = dialog.selected_sheet
-                        success, message = load_excel_file(file_path, sheet)
+                        success, message, info = load_file(file_path, sheet)
                     else:
                         if self.main_window:
                             self.main_window.show_progress(-1)
                             self.main_window.set_status("Loading cancelled")
                         return
                 else:
-                    success, message = load_excel_file(file_path)
+                    success, message, info = load_file(file_path)
             else:
-                success = False
-                message = f"Unsupported file type: {ext}"
+                success, message, info = load_file(file_path)
             
             if success:
-                self._on_data_loaded(path)
+                self._on_data_loaded(path, info)
                 if self.main_window:
                     self.main_window.set_status(message)
             else:
@@ -528,7 +617,7 @@ class DataQualityTab(QWidget):
             if self.main_window:
                 self.main_window.show_progress(-1)
     
-    def _on_data_loaded(self, path: Path):
+    def _on_data_loaded(self, path: Path, info: Dict):
         """
         handle successful data load
         """
@@ -536,9 +625,21 @@ class DataQualityTab(QWidget):
         self.lbl_file_info.setText(f"File: {path.name}")
         
         # update data stats
-        self._update_data_display()
+        stats = f"Rows: {info['rows']:,}\n"
+        stats += f"Columns: {info['columns']}"
+        self.lbl_data_stats.setText(stats)
+        
+        # update configuration status
+        suggestions = info.get('suggestions', {})
+        if suggestions.get('date') and suggestions.get('sku') and suggestions.get('quantity'):
+            self.lbl_config_status.setText("Columns detected - click to configure")
+            self.lbl_config_status.setStyleSheet("color: #ff9800;")
+        else:
+            self.lbl_config_status.setText("Please configure columns")
+            self.lbl_config_status.setStyleSheet("color: #ff9800;")
         
         # enable buttons
+        self.btn_configure.setEnabled(True)
         self.btn_profile.setEnabled(True)
         self.btn_clean.setEnabled(True)
         
@@ -555,19 +656,21 @@ class DataQualityTab(QWidget):
         """
         update data statistics display
         """
-        if STATE.clean_data is None:
+        if STATE.raw_data is None:
             self.lbl_data_stats.setText("")
             return
         
-        df = STATE.clean_data
+        df = STATE.raw_data
         
         stats = f"Rows: {len(df):,}\n"
-        stats += f"Columns: {len(df.columns)}\n"
-        stats += f"SKUs: {df['SKU'].nunique() if 'SKU' in df.columns else 'N/A'}"
+        stats += f"Columns: {len(df.columns)}"
+        
+        if is_columns_configured() and STATE.clean_data is not None:
+            stats += f"\nSKUs: {len(STATE.sku_list)}"
         
         self.lbl_data_stats.setText(stats)
         
-        # update summary cards if visible
+        # update summary cards
         if self.stack.currentIndex() == 1:
             self._build_summary_cards()
     
@@ -581,10 +684,10 @@ class DataQualityTab(QWidget):
             if child.widget():
                 child.widget().deleteLater()
         
-        if STATE.clean_data is None:
+        if STATE.raw_data is None:
             return
         
-        df = STATE.clean_data
+        df = STATE.raw_data
         
         # ---------- OVERVIEW CARD ----------
         overview_card = self._create_card("Overview")
@@ -592,16 +695,24 @@ class DataQualityTab(QWidget):
         
         overview_layout.addWidget(QLabel(f"Total Rows: {len(df):,}"))
         overview_layout.addWidget(QLabel(f"Total Columns: {len(df.columns)}"))
-        
-        if 'SKU' in df.columns:
-            overview_layout.addWidget(QLabel(f"Unique SKUs: {df['SKU'].nunique():,}"))
-        
-        if 'Date' in df.columns:
-            date_min = df['Date'].min()
-            date_max = df['Date'].max()
-            overview_layout.addWidget(QLabel(f"Date Range: {date_min} to {date_max}"))
+        overview_layout.addWidget(QLabel(f"Columns: {', '.join(df.columns[:5])}{'...' if len(df.columns) > 5 else ''}"))
         
         self.summary_layout.addWidget(overview_card)
+        
+        # ---------- COLUMN SUGGESTIONS CARD ----------
+        suggestions = get_column_suggestions()
+        suggest_card = self._create_card("Column Suggestions")
+        suggest_layout = suggest_card.layout()
+        
+        for field, col in suggestions.items():
+            if col:
+                suggest_layout.addWidget(QLabel(f"{field.capitalize()}: {col}"))
+            else:
+                lbl = QLabel(f"{field.capitalize()}: Not detected")
+                lbl.setStyleSheet("color: #ff9800;")
+                suggest_layout.addWidget(lbl)
+        
+        self.summary_layout.addWidget(suggest_card)
         
         # ---------- MISSING VALUES CARD ----------
         missing_summary = get_missing_summary(df)
@@ -735,7 +846,6 @@ class DataQualityTab(QWidget):
         """
         update undo/redo button states
         """
-        from utils.cleaning import can_rollback, can_redo
         self.btn_undo.setEnabled(can_rollback())
         self.btn_redo.setEnabled(can_redo())
     
