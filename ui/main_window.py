@@ -346,8 +346,8 @@ class MainWindow(QMainWindow):
     
     def _on_navigate_to_data(self, sku: str) -> None:
         # handle navigation to data tab for correction
-        self._switch_to_tab(0)
-        # could highlight specific sku in data tab
+        self._data_tab.add_flagged_sku(sku)
+        # don't switch tab automatically - user may want to continue reviewing
     
     # ---------- UI UPDATES ----------
     

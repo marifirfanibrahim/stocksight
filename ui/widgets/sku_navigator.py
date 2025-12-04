@@ -7,10 +7,11 @@ supports category cluster and search filtering
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QTreeWidget, QTreeWidgetItem, QComboBox, QLabel,
-    QPushButton, QMenu, QAction, QAbstractItemView
+    QPushButton, QMenu, QAction, QAbstractItemView,
+    QTreeWidgetItemIterator
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QIcon, QColor
+from PyQt5.QtGui import QColor
 from typing import Dict, List, Optional, Any
 
 import config
@@ -98,12 +99,17 @@ class SKUNavigator(QWidget):
         # action buttons
         button_layout = QHBoxLayout()
         
-        self._bookmark_btn = QPushButton("Bookmark")
+        self._bookmark_btn = QPushButton("★ Bookmark")
         self._bookmark_btn.setEnabled(False)
         button_layout.addWidget(self._bookmark_btn)
         
         self._select_all_btn = QPushButton("Select All")
         button_layout.addWidget(self._select_all_btn)
+        
+        self._select_group_btn = QPushButton("Select Group")
+        self._select_group_btn.setEnabled(False)
+        self._select_group_btn.setToolTip("Select all items in the currently selected group")
+        button_layout.addWidget(self._select_group_btn)
         
         self._clear_btn = QPushButton("Clear")
         button_layout.addWidget(self._clear_btn)
@@ -119,6 +125,7 @@ class SKUNavigator(QWidget):
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
         self._bookmark_btn.clicked.connect(self._toggle_bookmark)
         self._select_all_btn.clicked.connect(self._select_all)
+        self._select_group_btn.clicked.connect(self._select_current_group)
         self._clear_btn.clicked.connect(self._clear_selection)
     
     # ---------- DATA MANAGEMENT ----------
@@ -185,6 +192,7 @@ class SKUNavigator(QWidget):
             self._build_flat_tree(bookmarked)
         
         self._update_count()
+        self._update_select_group_button()
     
     def _build_flat_tree(self, skus: List[str]) -> None:
         # build flat list of skus
@@ -194,7 +202,6 @@ class SKUNavigator(QWidget):
     
     def _build_category_tree(self, skus: List[str]) -> None:
         # build tree grouped by category
-        # group skus by category
         cat_groups = {}
         for sku in skus:
             cat = self._get_sku_category(sku)
@@ -202,10 +209,10 @@ class SKUNavigator(QWidget):
                 cat_groups[cat] = []
             cat_groups[cat].append(sku)
         
-        # create tree structure
         for cat in sorted(cat_groups.keys()):
             cat_item = QTreeWidgetItem([cat, f"{len(cat_groups[cat])} items"])
-            cat_item.setData(0, Qt.UserRole, {"type": "category", "name": cat})
+            cat_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "category", "name": cat})
+            cat_item.setFlags(cat_item.flags() | Qt.ItemIsAutoTristate)
             
             for sku in cat_groups[cat]:
                 sku_item = self._create_sku_item(sku)
@@ -225,7 +232,8 @@ class SKUNavigator(QWidget):
             if tier_groups[tier]:
                 tier_label = config.CLUSTER_LABELS["volume"].get(tier, tier)
                 tier_item = QTreeWidgetItem([tier_label, f"{len(tier_groups[tier])} items"])
-                tier_item.setData(0, Qt.UserRole, {"type": "tier", "name": tier})
+                tier_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "tier", "name": tier})
+                tier_item.setFlags(tier_item.flags() | Qt.ItemIsAutoTristate)
                 
                 for sku in tier_groups[tier]:
                     sku_item = self._create_sku_item(sku)
@@ -245,7 +253,8 @@ class SKUNavigator(QWidget):
             if pattern_groups[pattern]:
                 pattern_label = config.CLUSTER_LABELS["pattern"].get(pattern, pattern)
                 pattern_item = QTreeWidgetItem([pattern_label, f"{len(pattern_groups[pattern])} items"])
-                pattern_item.setData(0, Qt.UserRole, {"type": "pattern", "name": pattern})
+                pattern_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "pattern", "name": pattern})
+                pattern_item.setFlags(pattern_item.flags() | Qt.ItemIsAutoTristate)
                 
                 for sku in pattern_groups[pattern]:
                     sku_item = self._create_sku_item(sku)
@@ -265,7 +274,8 @@ class SKUNavigator(QWidget):
         
         for cluster in sorted(cluster_groups.keys()):
             cluster_item = QTreeWidgetItem([cluster, f"{len(cluster_groups[cluster])} items"])
-            cluster_item.setData(0, Qt.UserRole, {"type": "cluster", "name": cluster})
+            cluster_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "cluster", "name": cluster})
+            cluster_item.setFlags(cluster_item.flags() | Qt.ItemIsAutoTristate)
             
             for sku in cluster_groups[cluster]:
                 sku_item = self._create_sku_item(sku)
@@ -278,6 +288,10 @@ class SKUNavigator(QWidget):
         info = self._get_sku_info_text(sku)
         item = QTreeWidgetItem([sku, info])
         item.setData(0, Qt.UserRole, {"type": "sku", "sku": sku})
+        item.setFlags(item.flags() | Qt.ItemIsSelectable)
+        
+        # allow text selection for copying
+        item.setFlags(item.flags() | Qt.ItemIsEditable)
         
         # mark bookmarked items
         if sku in self._bookmarks:
@@ -333,7 +347,6 @@ class SKUNavigator(QWidget):
     
     def _update_bookmark_display(self, sku: str) -> None:
         # update display for single sku
-        # find item in tree
         iterator = QTreeWidgetItemIterator(self._tree)
         while iterator.value():
             item = iterator.value()
@@ -344,7 +357,7 @@ class SKUNavigator(QWidget):
                     item.setForeground(0, QColor(config.UI_COLORS["primary"]))
                 else:
                     item.setText(0, sku)
-                    item.setForeground(0, QColor("black"))
+                    item.setForeground(0, QColor(config.UI_COLORS["text"]))
                 break
             iterator += 1
     
@@ -360,6 +373,12 @@ class SKUNavigator(QWidget):
             iterator += 1
         
         self._count_label.setText(f"{count:,} items")
+    
+    def _update_select_group_button(self) -> None:
+        # enable select group button when in grouped view
+        view = self._view_combo.currentText()
+        is_grouped = view in ["By Category", "By Volume Tier", "By Pattern", "By Cluster"]
+        self._select_group_btn.setEnabled(is_grouped)
     
     # ---------- EVENT HANDLERS ----------
     
@@ -385,6 +404,9 @@ class SKUNavigator(QWidget):
         data = item.data(0, Qt.UserRole)
         if data and data.get("type") == "sku":
             self.sku_double_clicked.emit(data["sku"])
+        elif data and data.get("type") == "group":
+            # expand/collapse group on double click
+            item.setExpanded(not item.isExpanded())
     
     def _show_context_menu(self, position) -> None:
         # show context menu
@@ -393,22 +415,45 @@ class SKUNavigator(QWidget):
             return
         
         data = item.data(0, Qt.UserRole)
-        if not data or data.get("type") != "sku":
-            return
-        
-        sku = data["sku"]
         menu = QMenu(self)
         
-        # bookmark action
-        if sku in self._bookmarks:
-            bookmark_action = QAction("Remove Bookmark", menu)
-            bookmark_action.triggered.connect(lambda: self._remove_bookmark_action(sku))
-        else:
-            bookmark_action = QAction("Add Bookmark", menu)
-            bookmark_action.triggered.connect(lambda: self._add_bookmark_action(sku))
+        if data and data.get("type") == "sku":
+            sku = data["sku"]
+            
+            # copy action
+            copy_action = QAction("Copy Item Name", menu)
+            copy_action.triggered.connect(lambda: self._copy_to_clipboard(sku))
+            menu.addAction(copy_action)
+            
+            menu.addSeparator()
+            
+            # bookmark action
+            if sku in self._bookmarks:
+                bookmark_action = QAction("Remove Bookmark", menu)
+                bookmark_action.triggered.connect(lambda: self._remove_bookmark_action(sku))
+            else:
+                bookmark_action = QAction("Add Bookmark", menu)
+                bookmark_action.triggered.connect(lambda: self._add_bookmark_action(sku))
+            menu.addAction(bookmark_action)
+            
+        elif data and data.get("type") == "group":
+            # select all in group
+            select_action = QAction("Select All in Group", menu)
+            select_action.triggered.connect(lambda: self._select_group_items(item))
+            menu.addAction(select_action)
+            
+            # copy group name
+            copy_action = QAction("Copy Group Name", menu)
+            copy_action.triggered.connect(lambda: self._copy_to_clipboard(data.get("name", "")))
+            menu.addAction(copy_action)
         
-        menu.addAction(bookmark_action)
         menu.exec_(self._tree.viewport().mapToGlobal(position))
+    
+    def _copy_to_clipboard(self, text: str) -> None:
+        # copy text to clipboard
+        from PyQt5.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
     
     def _toggle_bookmark(self) -> None:
         # toggle bookmark for selected items
@@ -438,6 +483,43 @@ class SKUNavigator(QWidget):
         # select all visible items
         self._tree.selectAll()
     
+    def _select_current_group(self) -> None:
+        # select all items in currently selected group
+        selected_items = self._tree.selectedItems()
+        
+        for item in selected_items:
+            data = item.data(0, Qt.UserRole)
+            
+            # if a group is selected select all its children
+            if data and data.get("type") == "group":
+                self._select_group_items(item)
+                return
+            
+            # if an item is selected find its parent group
+            parent = item.parent()
+            if parent:
+                self._select_group_items(parent)
+                return
+        
+        # if nothing specific selected select first group
+        if self._tree.topLevelItemCount() > 0:
+            first_group = self._tree.topLevelItem(0)
+            data = first_group.data(0, Qt.UserRole)
+            if data and data.get("type") == "group":
+                self._select_group_items(first_group)
+    
+    def _select_group_items(self, group_item: QTreeWidgetItem) -> None:
+        # select all items in a group
+        self._tree.clearSelection()
+        
+        for i in range(group_item.childCount()):
+            child = group_item.child(i)
+            child.setSelected(True)
+        
+        # also select the group itself
+        group_item.setSelected(True)
+        group_item.setExpanded(True)
+    
     def _clear_selection(self) -> None:
         # clear selection
         self._tree.clearSelection()
@@ -460,11 +542,25 @@ class SKUNavigator(QWidget):
             item = iterator.value()
             data = item.data(0, Qt.UserRole)
             if data and data.get("type") == "sku" and data.get("sku") == sku:
+                self._tree.clearSelection()
                 item.setSelected(True)
                 self._tree.scrollToItem(item)
+                
+                # expand parent if exists
+                parent = item.parent()
+                if parent:
+                    parent.setExpanded(True)
                 break
             iterator += 1
-
-
-# need to import for iterator
-from PyQt5.QtWidgets import QTreeWidgetItemIterator
+    
+    def get_skus_in_category(self, category: str) -> List[str]:
+        # get all skus in a category
+        return self._categories.get(category, [])
+    
+    def get_skus_in_tier(self, tier: str) -> List[str]:
+        # get all skus in a tier
+        return [sku for sku, cluster in self._clusters.items() if cluster.volume_tier == tier]
+    
+    def get_skus_in_pattern(self, pattern: str) -> List[str]:
+        # get all skus with a pattern
+        return [sku for sku, cluster in self._clusters.items() if cluster.pattern_type == pattern]

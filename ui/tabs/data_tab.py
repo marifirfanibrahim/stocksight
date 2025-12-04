@@ -7,7 +7,8 @@ handles file upload column mapping and data quality
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFrame, QProgressBar,
-    QScrollArea, QSplitter, QFileDialog, QMessageBox
+    QScrollArea, QSplitter, QFileDialog, QMessageBox,
+    QGridLayout
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QDragEnterEvent, QDropEvent
@@ -42,6 +43,7 @@ class DataTab(QWidget):
         self._processor = DataProcessor()
         self._detector = ColumnDetector()
         self._worker = None
+        self._flagged_skus = set()
         
         self._setup_ui()
         self._connect_signals()
@@ -67,6 +69,9 @@ class DataTab(QWidget):
         # upload section
         left_layout.addWidget(self._create_upload_section())
         
+        # column mapping display section
+        left_layout.addWidget(self._create_mapping_display_section())
+        
         # quality dashboard
         left_layout.addWidget(self._create_quality_section())
         
@@ -79,7 +84,6 @@ class DataTab(QWidget):
         self._proceed_btn = QPushButton("Proceed to Pattern Discovery →")
         self._proceed_btn.setEnabled(False)
         self._proceed_btn.setMinimumHeight(40)
-        self._proceed_btn.setStyleSheet(f"background-color: {config.UI_COLORS['primary']}; color: white; font-weight: bold;")
         self._proceed_btn.clicked.connect(self.proceed_requested.emit)
         left_layout.addWidget(self._proceed_btn)
         
@@ -90,9 +94,19 @@ class DataTab(QWidget):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         
+        preview_header = QHBoxLayout()
         preview_label = QLabel("Data Preview")
         preview_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        right_layout.addWidget(preview_label)
+        preview_header.addWidget(preview_label)
+        
+        preview_header.addStretch()
+        
+        # flagged items indicator
+        self._flagged_label = QLabel("")
+        self._flagged_label.setStyleSheet("color: #FFD54F;")
+        preview_header.addWidget(self._flagged_label)
+        
+        right_layout.addLayout(preview_header)
         
         self._data_table = VirtualDataTable()
         right_layout.addWidget(self._data_table)
@@ -112,57 +126,73 @@ class DataTab(QWidget):
         # drop zone
         self._drop_zone = QFrame()
         self._drop_zone.setFrameStyle(QFrame.StyledPanel)
-        self._drop_zone.setMinimumHeight(120)
-        self._drop_zone.setStyleSheet("""
-            QFrame {
-                border: 2px dashed #ccc;
-                border-radius: 10px;
-                background-color: #f9f9f9;
-            }
-            QFrame:hover {
-                border-color: #2E86AB;
-                background-color: #f0f7fa;
-            }
-        """)
+        self._drop_zone.setMinimumHeight(100)
+        self._drop_zone.setCursor(Qt.PointingHandCursor)
         
         drop_layout = QVBoxLayout(self._drop_zone)
         drop_layout.setAlignment(Qt.AlignCenter)
         
         drop_icon = QLabel("📁")
-        drop_icon.setFont(QFont("Segoe UI", 32))
+        drop_icon.setFont(QFont("Segoe UI", 28))
         drop_icon.setAlignment(Qt.AlignCenter)
         drop_layout.addWidget(drop_icon)
         
-        drop_text = QLabel("Drag & drop your file here\nor click to browse")
+        drop_text = QLabel("Drag & drop your file here or click to browse")
         drop_text.setAlignment(Qt.AlignCenter)
-        drop_text.setStyleSheet("color: #666;")
         drop_layout.addWidget(drop_text)
         
         self._file_types_label = QLabel("Supports: CSV, Excel, Parquet")
         self._file_types_label.setAlignment(Qt.AlignCenter)
-        self._file_types_label.setStyleSheet("color: #999; font-size: 10px;")
+        self._file_types_label.setStyleSheet("font-size: 10px;")
         drop_layout.addWidget(self._file_types_label)
         
         layout.addWidget(self._drop_zone)
         
         # file info
         self._file_info_label = QLabel("")
-        self._file_info_label.setStyleSheet("color: gray;")
         layout.addWidget(self._file_info_label)
         
         # column mapping button
         mapping_layout = QHBoxLayout()
         
-        self._mapping_btn = QPushButton("Confirm Column Mapping")
+        self._mapping_btn = QPushButton("📋 Edit Column Mapping")
         self._mapping_btn.setEnabled(False)
         self._mapping_btn.clicked.connect(self._show_mapping_dialog)
         mapping_layout.addWidget(self._mapping_btn)
         
-        self._mapping_status = QLabel("")
-        mapping_layout.addWidget(self._mapping_status)
-        
         mapping_layout.addStretch()
         layout.addLayout(mapping_layout)
+        
+        return group
+    
+    def _create_mapping_display_section(self) -> QGroupBox:
+        # create column mapping display section
+        group = QGroupBox("Column Mapping")
+        layout = QGridLayout(group)
+        layout.setSpacing(8)
+        
+        # column labels
+        self._mapping_labels = {}
+        
+        mappings = [
+            ("date", "📅 Date:"),
+            ("sku", "🏷 Item/SKU:"),
+            ("quantity", "📊 Quantity:"),
+            ("category", "📁 Category:"),
+            ("price", "💰 Price:"),
+            ("promo", "🎯 Promotion:")
+        ]
+        
+        for i, (key, label_text) in enumerate(mappings):
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold;")
+            layout.addWidget(label, i, 0)
+            
+            value_label = QLabel("Not mapped")
+            value_label.setStyleSheet("color: #9E9E9E;")
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # allow copy
+            self._mapping_labels[key] = value_label
+            layout.addWidget(value_label, i, 1)
         
         return group
     
@@ -177,6 +207,7 @@ class DataTab(QWidget):
         self._quality_score_label = QLabel("--")
         self._quality_score_label.setFont(QFont("Segoe UI", 36, QFont.Bold))
         self._quality_score_label.setAlignment(Qt.AlignCenter)
+        self._quality_score_label.setMinimumWidth(80)
         score_layout.addWidget(self._quality_score_label)
         
         score_info = QVBoxLayout()
@@ -185,7 +216,6 @@ class DataTab(QWidget):
         score_info.addWidget(self._quality_status_label)
         
         self._quality_details_label = QLabel("")
-        self._quality_details_label.setStyleSheet("color: gray;")
         self._quality_details_label.setWordWrap(True)
         score_info.addWidget(self._quality_details_label)
         
@@ -200,6 +230,7 @@ class DataTab(QWidget):
         issues_layout.setContentsMargins(0, 0, 0, 0)
         self._issues_label = QLabel("")
         self._issues_label.setWordWrap(True)
+        self._issues_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         issues_layout.addWidget(self._issues_label)
         self._issues_frame.setVisible(False)
         layout.addWidget(self._issues_frame)
@@ -207,7 +238,7 @@ class DataTab(QWidget):
         # fix buttons
         fix_layout = QHBoxLayout()
         
-        self._fix_btn = QPushButton("Apply Recommended Fixes")
+        self._fix_btn = QPushButton("🔧 Apply Recommended Fixes")
         self._fix_btn.setEnabled(False)
         self._fix_btn.clicked.connect(self._apply_fixes)
         fix_layout.addWidget(self._fix_btn)
@@ -226,9 +257,9 @@ class DataTab(QWidget):
         self._class_frame = QFrame()
         class_layout = QHBoxLayout(self._class_frame)
         
-        for tier, color, desc in [("A", "#28A745", "High Volume"), 
-                                   ("B", "#FFC107", "Medium Volume"), 
-                                   ("C", "#DC3545", "Low Volume")]:
+        for tier, color, desc in [("A", "#81C784", "High Volume"), 
+                                   ("B", "#FFD54F", "Medium Volume"), 
+                                   ("C", "#E57373", "Low Volume")]:
             tier_widget = QWidget()
             tier_layout = QVBoxLayout(tier_widget)
             tier_layout.setAlignment(Qt.AlignCenter)
@@ -242,10 +273,11 @@ class DataTab(QWidget):
             count_label = QLabel("--")
             count_label.setObjectName(f"tier_{tier}_count")
             count_label.setAlignment(Qt.AlignCenter)
+            count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             tier_layout.addWidget(count_label)
             
             desc_label = QLabel(desc)
-            desc_label.setStyleSheet("color: gray; font-size: 10px;")
+            desc_label.setStyleSheet("font-size: 10px;")
             desc_label.setAlignment(Qt.AlignCenter)
             tier_layout.addWidget(desc_label)
             
@@ -255,7 +287,7 @@ class DataTab(QWidget):
         
         # explanation
         explain = QLabel("Items are classified using the 80/20 rule based on total volume")
-        explain.setStyleSheet("color: gray; font-style: italic;")
+        explain.setStyleSheet("font-style: italic;")
         layout.addWidget(explain)
         
         return group
@@ -270,34 +302,13 @@ class DataTab(QWidget):
         # handle drag enter
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self._drop_zone.setStyleSheet("""
-                QFrame {
-                    border: 2px dashed #2E86AB;
-                    border-radius: 10px;
-                    background-color: #e6f3f8;
-                }
-            """)
     
     def dragLeaveEvent(self, event) -> None:
         # handle drag leave
-        self._drop_zone.setStyleSheet("""
-            QFrame {
-                border: 2px dashed #ccc;
-                border-radius: 10px;
-                background-color: #f9f9f9;
-            }
-        """)
+        pass
     
     def dropEvent(self, event: QDropEvent) -> None:
         # handle file drop
-        self._drop_zone.setStyleSheet("""
-            QFrame {
-                border: 2px dashed #ccc;
-                border-radius: 10px;
-                background-color: #f9f9f9;
-            }
-        """)
-        
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
@@ -348,8 +359,8 @@ class DataTab(QWidget):
             mapping = self._detector.get_best_mapping(detections)
             self._processor.set_column_mapping(mapping)
             
-            # update mapping status
-            self._update_mapping_status(mapping, detections)
+            # update mapping display
+            self._update_mapping_display(mapping)
             
             # enable mapping button
             self._mapping_btn.setEnabled(True)
@@ -360,7 +371,7 @@ class DataTab(QWidget):
             # store detections for dialog
             self._detections = detections
             
-            # if high confidence show dialog anyway for confirmation
+            # show mapping dialog for confirmation
             self._show_mapping_dialog()
         else:
             self._file_info_label.setText(f"✗ {message}")
@@ -371,18 +382,16 @@ class DataTab(QWidget):
         self._file_info_label.setText(f"✗ Error: {error}")
         QMessageBox.critical(self, "Error", f"Failed to load file:\n{error}")
     
-    def _update_mapping_status(self, mapping: Dict, detections: Dict) -> None:
-        # update mapping status display
-        mapped_count = len(mapping)
-        required = ["date", "sku", "quantity"]
-        missing = [r for r in required if r not in mapping]
-        
-        if missing:
-            self._mapping_status.setText(f"⚠ Missing: {', '.join(missing)}")
-            self._mapping_status.setStyleSheet("color: orange;")
-        else:
-            self._mapping_status.setText(f"✓ {mapped_count} columns mapped")
-            self._mapping_status.setStyleSheet("color: green;")
+    def _update_mapping_display(self, mapping: Dict) -> None:
+        # update mapping labels to show mapped columns
+        for key, label in self._mapping_labels.items():
+            if key in mapping:
+                col_name = mapping[key]
+                label.setText(f"→ {col_name}")
+                label.setStyleSheet("color: #81C784; font-weight: bold;")
+            else:
+                label.setText("Not mapped")
+                label.setStyleSheet("color: #9E9E9E;")
     
     # ---------- COLUMN MAPPING ----------
     
@@ -401,6 +410,9 @@ class DataTab(QWidget):
     def _on_mapping_confirmed(self, mapping: Dict) -> None:
         # handle confirmed mapping
         self._processor.set_column_mapping(mapping)
+        
+        # update display
+        self._update_mapping_display(mapping)
         
         # process data
         success, message = self._processor.process_data()
@@ -422,10 +434,6 @@ class DataTab(QWidget):
             
             # update preview with processed data
             self._data_table.set_data(self._processor.processed_data.head(1000))
-            
-            # update status
-            self._mapping_status.setText(f"✓ {len(mapping)} columns mapped")
-            self._mapping_status.setStyleSheet("color: green;")
             
             # emit signal
             self.data_processed.emit()
@@ -541,6 +549,25 @@ class DataTab(QWidget):
         
         # enable proceed
         self._proceed_btn.setEnabled(True)
+    
+    # ---------- FLAGGED ITEMS ----------
+    
+    def add_flagged_sku(self, sku: str) -> None:
+        # add sku to flagged list
+        self._flagged_skus.add(sku)
+        self._update_flagged_display()
+    
+    def _update_flagged_display(self) -> None:
+        # update flagged items display
+        count = len(self._flagged_skus)
+        if count > 0:
+            self._flagged_label.setText(f"⚠ {count} item(s) flagged for review")
+        else:
+            self._flagged_label.setText("")
+    
+    def get_flagged_skus(self) -> set:
+        # get flagged skus
+        return self._flagged_skus.copy()
     
     # ---------- PUBLIC METHODS ----------
     

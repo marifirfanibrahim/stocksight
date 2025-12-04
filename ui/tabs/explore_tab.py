@@ -459,7 +459,12 @@ class ExploreTab(QWidget):
         dialog = AnomalyReviewDialog(playlist, self)
         dialog.anomalies_actioned.connect(self._on_anomalies_actioned)
         dialog.navigate_to_sku.connect(self._navigate_to_sku)
+        dialog.flag_for_correction.connect(self._on_flag_for_correction)
         dialog.exec_()
+
+    def _on_flag_for_correction(self, sku: str) -> None:
+        # handle flag for correction from anomaly dialog
+        self.navigate_to_data.emit(sku)
     
     def _on_anomalies_actioned(self, actions: List) -> None:
         # handle anomaly actions

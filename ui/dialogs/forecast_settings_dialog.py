@@ -31,6 +31,14 @@ class ForecastSettingsDialog(QDialog):
         super().__init__(parent)
         
         self._sku_count = sku_count
+        self._horizon_spin = None  # initialize before setup
+        self._strategy_group = None
+        self._tier_processing = None
+        self._include_intervals = None
+        self._model_comparison = None
+        self._bookmarks_first = None
+        self._estimate_label = None
+        
         self._setup_ui()
     
     # ---------- UI SETUP ----------
@@ -55,7 +63,6 @@ class ForecastSettingsDialog(QDialog):
         # separator
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color: #ddd;")
         layout.addWidget(line)
         
         # horizon selection
@@ -66,7 +73,7 @@ class ForecastSettingsDialog(QDialog):
         
         # estimate label
         self._estimate_label = QLabel("")
-        self._estimate_label.setStyleSheet("color: #666; font-style: italic; padding: 10px; background: #f5f5f5; border-radius: 5px;")
+        self._estimate_label.setStyleSheet("padding: 10px; border-radius: 5px;")
         self._estimate_label.setWordWrap(True)
         layout.addWidget(self._estimate_label)
         
@@ -87,7 +94,7 @@ class ForecastSettingsDialog(QDialog):
         
         layout.addLayout(button_layout)
         
-        # initial estimate
+        # initial estimate update
         self._update_estimate()
     
     def _create_strategy_group(self) -> QGroupBox:
@@ -103,7 +110,6 @@ class ForecastSettingsDialog(QDialog):
             # strategy container
             container = QFrame()
             container.setFrameStyle(QFrame.StyledPanel)
-            container.setStyleSheet("QFrame { padding: 10px; }")
             container_layout = QVBoxLayout(container)
             container_layout.setSpacing(5)
             
@@ -117,12 +123,12 @@ class ForecastSettingsDialog(QDialog):
             
             # description
             desc = QLabel(info["description"])
-            desc.setStyleSheet("color: gray; margin-left: 20px;")
+            desc.setStyleSheet("margin-left: 20px;")
             container_layout.addWidget(desc)
             
             # time and recommendation
             details = QLabel(f"⏱ {info['time_estimate']} | Best for: {info['recommended_for']}")
-            details.setStyleSheet("color: #888; font-size: 10px; margin-left: 20px;")
+            details.setStyleSheet("font-size: 10px; margin-left: 20px;")
             container_layout.addWidget(details)
             
             layout.addWidget(container)
@@ -168,6 +174,7 @@ class ForecastSettingsDialog(QDialog):
         self._tier_processing = QCheckBox("Use tier-based processing")
         self._tier_processing.setChecked(True)
         self._tier_processing.setToolTip("A-items get detailed models, C-items get simple models")
+        self._tier_processing.stateChanged.connect(self._update_estimate)
         layout.addWidget(self._tier_processing)
         
         # include confidence intervals
@@ -196,17 +203,22 @@ class ForecastSettingsDialog(QDialog):
         # set horizon from quick select button
         btn = self.sender()
         days = btn.property("days")
-        self._horizon_spin.setValue(days)
+        if self._horizon_spin:
+            self._horizon_spin.setValue(days)
     
     def _get_selected_strategy(self) -> str:
         # get currently selected strategy
-        selected = self._strategy_group.checkedButton()
-        if selected:
-            return selected.property("strategy_key")
+        if self._strategy_group:
+            selected = self._strategy_group.checkedButton()
+            if selected:
+                return selected.property("strategy_key")
         return "balanced"
     
     def _update_estimate(self) -> None:
         # update time estimate label
+        if not self._estimate_label or not self._horizon_spin:
+            return
+        
         strategy = self._get_selected_strategy()
         horizon = self._horizon_spin.value()
         
@@ -247,7 +259,7 @@ class ForecastSettingsDialog(QDialog):
             f"📅 Generating {horizon}-day forecasts"
         )
         
-        if self._tier_processing.isChecked():
+        if self._tier_processing and self._tier_processing.isChecked():
             message += "\n✓ Tier-based processing enabled (faster for large datasets)"
         
         self._estimate_label.setText(message)
@@ -264,11 +276,11 @@ class ForecastSettingsDialog(QDialog):
         # get current settings
         return {
             "strategy": self._get_selected_strategy(),
-            "horizon": self._horizon_spin.value(),
-            "tier_processing": self._tier_processing.isChecked(),
-            "include_intervals": self._include_intervals.isChecked(),
-            "model_comparison": self._model_comparison.isChecked(),
-            "bookmarks_first": self._bookmarks_first.isChecked()
+            "horizon": self._horizon_spin.value() if self._horizon_spin else 30,
+            "tier_processing": self._tier_processing.isChecked() if self._tier_processing else True,
+            "include_intervals": self._include_intervals.isChecked() if self._include_intervals else True,
+            "model_comparison": self._model_comparison.isChecked() if self._model_comparison else False,
+            "bookmarks_first": self._bookmarks_first.isChecked() if self._bookmarks_first else False
         }
     
     def set_sku_count(self, count: int) -> None:

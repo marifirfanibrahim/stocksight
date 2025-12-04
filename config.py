@@ -39,6 +39,9 @@ WINDOW_MIN_HEIGHT = 800
 WINDOW_DEFAULT_WIDTH = 1400
 WINDOW_DEFAULT_HEIGHT = 900
 
+# ---------- THEME SETTINGS ----------
+DEFAULT_THEME = "dark"  # dark or light
+
 # ============================================================================
 #                             DATA PROCESSING
 # ============================================================================
@@ -372,28 +375,48 @@ PPT_TEMPLATE = {
 #                                  UI
 # ============================================================================
 
-# ---------- COLORS ----------
-UI_COLORS = {
+# ---------- DARK THEME COLORS ----------
+UI_COLORS_DARK = {
+    "primary": "#4FC3F7",
+    "secondary": "#CE93D8",
+    "success": "#81C784",
+    "warning": "#FFD54F",
+    "danger": "#E57373",
+    "info": "#4DD0E1",
+    "background": "#1E1E1E",
+    "surface": "#2D2D2D",
+    "surface_light": "#3D3D3D",
+    "text": "#E0E0E0",
+    "text_secondary": "#9E9E9E",
+    "border": "#424242"
+}
+
+# ---------- LIGHT THEME COLORS ----------
+UI_COLORS_LIGHT = {
     "primary": "#2E86AB",
     "secondary": "#A23B72",
     "success": "#28A745",
     "warning": "#FFC107",
     "danger": "#DC3545",
     "info": "#17A2B8",
-    "light": "#F8F9FA",
-    "dark": "#343A40",
     "background": "#FFFFFF",
     "surface": "#F5F5F5",
+    "surface_light": "#FAFAFA",
+    "text": "#212121",
+    "text_secondary": "#757575",
     "border": "#DEE2E6"
 }
 
+# default to dark theme
+UI_COLORS = UI_COLORS_DARK if DEFAULT_THEME == "dark" else UI_COLORS_LIGHT
+
 # ---------- QUALITY SCORE COLORS ----------
 QUALITY_COLORS = {
-    "excellent": {"min": 90, "color": "#28A745"},
-    "good": {"min": 75, "color": "#8BC34A"},
-    "fair": {"min": 60, "color": "#FFC107"},
-    "poor": {"min": 40, "color": "#FF9800"},
-    "critical": {"min": 0, "color": "#DC3545"}
+    "excellent": {"min": 90, "color": "#81C784"},
+    "good": {"min": 75, "color": "#AED581"},
+    "fair": {"min": 60, "color": "#FFD54F"},
+    "poor": {"min": 40, "color": "#FFB74D"},
+    "critical": {"min": 0, "color": "#E57373"}
 }
 
 # ---------- TAB NAMES ----------
@@ -438,9 +461,9 @@ def ensure_directories():
 
 def get_quality_color(score):
     # return color based on quality score
-    for level, config in QUALITY_COLORS.items():
-        if score >= config["min"]:
-            return config["color"]
+    for level, cfg in QUALITY_COLORS.items():
+        if score >= cfg["min"]:
+            return cfg["color"]
     return QUALITY_COLORS["critical"]["color"]
 
 
@@ -449,3 +472,10 @@ def get_cluster_label(volume_tier, pattern_type):
     vol_label = CLUSTER_LABELS["volume"].get(volume_tier, volume_tier)
     pat_label = CLUSTER_LABELS["pattern"].get(pattern_type, pattern_type)
     return f"{vol_label} - {pat_label}"
+
+
+def set_theme(theme: str):
+    # set ui theme
+    global UI_COLORS, DEFAULT_THEME
+    DEFAULT_THEME = theme
+    UI_COLORS = UI_COLORS_DARK if theme == "dark" else UI_COLORS_LIGHT
