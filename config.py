@@ -1,298 +1,451 @@
 """
-application configuration
-store settings and constants
-manage paths and parameters
+stocksight configuration
+contains all thresholds defaults and settings
+manages application-wide constants
 """
-
-
-# ================ IMPORTS ================
 
 import os
 from pathlib import Path
 
+# ============================================================================
+#                                PATHS
+# ============================================================================
 
-# ================ PATHS ================
+# ---------- BASE DIRECTORIES ----------
+BASE_DIR = Path(__file__).parent
+ASSETS_DIR = BASE_DIR / "assets"
+ICONS_DIR = ASSETS_DIR / "icons"
+STYLES_DIR = ASSETS_DIR / "styles"
+TEMPLATES_DIR = ASSETS_DIR / "templates"
 
-class Paths:
-    """
-    directory and file paths
-    """
-    # ---------- BASE DIRECTORY ----------
-    BASE_DIR = Path(__file__).parent.absolute()
-    
-    # ---------- DATA DIRECTORY ----------
-    DATA_DIR = BASE_DIR / "data"
-    
-    # ---------- OUTPUT DIRECTORY ----------
-    OUTPUT_DIR = BASE_DIR / "output"
-    
-    # ---------- UTILS DIRECTORY ----------
-    UTILS_DIR = BASE_DIR / "utils"
-    
-    # ---------- USER DOCUMENTS ----------
-    USER_DOCS = Path.home() / "Documents" / "Stocksight"
-    USER_OUTPUT = USER_DOCS / "output"
-    
-    # ---------- DEFAULT FILES ----------
-    DEFAULT_CSV = DATA_DIR / "inventory.csv"
-    FORECAST_CHART = OUTPUT_DIR / "forecast.png"
-    FORECAST_DATA = OUTPUT_DIR / "forecast_data.csv"
-    SUMMARY_FILE = OUTPUT_DIR / "summary.txt"
-    LOG_FILE = OUTPUT_DIR / "app.log"
+# ---------- USER DIRECTORIES ----------
+USER_HOME = Path.home()
+APP_DATA_DIR = USER_HOME / ".stocksight"
+LOG_DIR = APP_DATA_DIR / "logs"
+CACHE_DIR = APP_DATA_DIR / "cache"
 
+# ============================================================================
+#                              APPLICATION
+# ============================================================================
 
-# ================ AUTOTS SETTINGS ================
+# ---------- APP INFO ----------
+APP_NAME = "StockSight"
+APP_VERSION = "1.0.0"
+APP_AUTHOR = "StockSight Team"
 
-class AutoTSConfig:
-    """
-    autots model parameters
-    """
-    # ---------- FORECAST LENGTH ----------
-    DEFAULT_FORECAST_DAYS = 30
-    MIN_FORECAST_DAYS = 1
-    MAX_FORECAST_DAYS = 365
-    
-    # ---------- MODEL SETTINGS ----------
-    FREQUENCY = 'infer'
-    ENSEMBLE = 'simple'
-    MAX_GENERATIONS = 2
-    NUM_VALIDATIONS = 1
-    VALIDATION_METHOD = 'backwards'
-    MODEL_LIST = 'fast'
-    TRANSFORMER_LIST = 'fast'
-    N_JOBS = 'auto'
-    
-    # ---------- CONFIDENCE SETTINGS ----------
-    PREDICTION_INTERVAL = 0.95
-    SHOW_CONFIDENCE_BANDS = True
-    
-    # ---------- SPEED PRESETS ----------
-    SUPERFAST_MODE = {
-        'max_generations': 1,
-        'num_validations': 0,
-        'model_list': 'superfast',
-        'transformer_list': 'superfast',
-        'ensemble': None,
-        'models_to_validate': 0.1
+# ---------- WINDOW SETTINGS ----------
+WINDOW_MIN_WIDTH = 1200
+WINDOW_MIN_HEIGHT = 800
+WINDOW_DEFAULT_WIDTH = 1400
+WINDOW_DEFAULT_HEIGHT = 900
+
+# ============================================================================
+#                             DATA PROCESSING
+# ============================================================================
+
+# ---------- FILE SUPPORT ----------
+SUPPORTED_FILE_TYPES = {
+    "csv": "CSV Files (*.csv)",
+    "excel": "Excel Files (*.xlsx *.xls)",
+    "parquet": "Parquet Files (*.parquet)"
+}
+
+MAX_FILE_SIZE_MB = 500
+
+# ---------- COLUMN DETECTION ----------
+COLUMN_DETECTION = {
+    "date_keywords": [
+        "date", "time", "timestamp", "period", "day", "week", "month", "year"
+    ],
+    "sku_keywords": [
+        "sku", "item", "product", "article", "code", "id", "upc", "ean"
+    ],
+    "quantity_keywords": [
+        "quantity", "qty", "sales", "demand", "units", "volume", "count"
+    ],
+    "category_keywords": [
+        "category", "group", "family", "class", "type", "segment"
+    ],
+    "price_keywords": [
+        "price", "cost", "value", "amount", "revenue"
+    ],
+    "promo_keywords": [
+        "promo", "promotion", "discount", "offer", "sale", "campaign"
+    ],
+    "confidence_threshold": 0.7
+}
+
+# ---------- DATA QUALITY ----------
+DATA_QUALITY = {
+    "min_data_points": 12,
+    "max_missing_pct": 30,
+    "outlier_std_threshold": 3.0,
+    "duplicate_check": True
+}
+
+# ============================================================================
+#                              CLUSTERING
+# ============================================================================
+
+# ---------- VOLUME TIERS ----------
+CLUSTERING = {
+    "volume_thresholds": {
+        "A": 1000,  # units per week
+        "B": 100,
+        "C": 0
+    },
+    "volume_percentiles": {
+        "A": 80,  # top 20% by volume
+        "B": 50,  # next 30%
+        "C": 0    # bottom 50%
+    },
+    "pattern_thresholds": {
+        "seasonal": 0.6,   # q4 concentration above 60%
+        "erratic": 0.8,    # cv above 0.8
+        "variable": 0.3,   # cv between 0.3 and 0.8
+        "steady": 0.0      # cv below 0.3
+    },
+    "use_percentiles": True  # use percentiles instead of absolute thresholds
+}
+
+# ---------- CLUSTER LABELS ----------
+CLUSTER_LABELS = {
+    "volume": {
+        "A": "High Volume",
+        "B": "Medium Volume",
+        "C": "Low Volume"
+    },
+    "pattern": {
+        "seasonal": "Seasonal",
+        "erratic": "Erratic",
+        "variable": "Variable",
+        "steady": "Steady"
     }
-    
-    FAST_MODE = {
-        'max_generations': 2,
-        'num_validations': 1,
-        'model_list': 'fast',
-        'transformer_list': 'fast',
-        'ensemble': 'simple',
-        'models_to_validate': 0.15
+}
+
+# ============================================================================
+#                           FEATURE ENGINEERING
+# ============================================================================
+
+# ---------- CURATED FEATURES ----------
+FEATURES = {
+    "curated": [
+        "lag_1", "lag_7", "lag_28",
+        "rolling_mean_7", "rolling_mean_28",
+        "rolling_std_7", "rolling_std_28",
+        "year", "month", "week_of_year",
+        "day_of_week", "is_weekend", "is_holiday",
+        "days_to_holiday", "price_change_pct",
+        "price_relative_to_avg", "promo_flag",
+        "promo_intensity", "seasonal_index",
+        "trend_component"
+    ],
+    "basic_5": [
+        "lag_1", "lag_7", "rolling_mean_7", "month", "day_of_week"
+    ],
+    "top_10": [
+        "lag_1", "lag_7", "lag_28",
+        "rolling_mean_7", "rolling_mean_28",
+        "month", "week_of_year", "day_of_week",
+        "seasonal_index", "trend_component"
+    ],
+    "group_config": {
+        "A": "all_20",
+        "B": "top_10",
+        "C": "basic_5"
     }
-    
-    BALANCED_MODE = {
-        'max_generations': 5,
-        'num_validations': 2,
-        'model_list': 'default',
-        'transformer_list': 'fast',
-        'ensemble': 'simple',
-        'models_to_validate': 0.25
+}
+
+# ---------- FEATURE DESCRIPTIONS ----------
+FEATURE_DESCRIPTIONS = {
+    "lag_1": "yesterday's sales predict today",
+    "lag_7": "last week's sales predict this week",
+    "lag_28": "last month's sales predict this month",
+    "rolling_mean_7": "average sales over past week",
+    "rolling_mean_28": "average sales over past month",
+    "rolling_std_7": "sales variability over past week",
+    "rolling_std_28": "sales variability over past month",
+    "year": "year number for trend detection",
+    "month": "month of year for seasonality",
+    "week_of_year": "week number for weekly patterns",
+    "day_of_week": "weekday vs weekend patterns",
+    "is_weekend": "saturday and sunday flag",
+    "is_holiday": "holiday impact on sales",
+    "days_to_holiday": "proximity to upcoming holiday",
+    "price_change_pct": "price changes affect demand",
+    "price_relative_to_avg": "price compared to average",
+    "promo_flag": "promotion active indicator",
+    "promo_intensity": "promotion strength measure",
+    "seasonal_index": "seasonal pattern strength",
+    "trend_component": "long-term trend direction"
+}
+
+# ============================================================================
+#                              FORECASTING
+# ============================================================================
+
+# ---------- STRATEGIES ----------
+FORECASTING = {
+    "simple": {
+        "name": "Simple & Fast",
+        "icon": "🔵",
+        "models": ["naive", "seasonal_naive", "exponential_smoothing"],
+        "time_estimate": "5-10 minutes",
+        "description": "Quick baseline forecasts for all items",
+        "recommended_for": "Initial analysis and C-items"
+    },
+    "balanced": {
+        "name": "Smart & Balanced",
+        "icon": "🟡",
+        "models": ["exponential_smoothing", "arima", "theta", "prophet"],
+        "time_estimate": "20-30 minutes",
+        "description": "Best balance of speed and accuracy",
+        "recommended_for": "Most business scenarios"
+    },
+    "advanced": {
+        "name": "Advanced AI",
+        "icon": "🔴",
+        "models": ["lightgbm", "xgboost", "ensemble"],
+        "time_estimate": "1-2 hours",
+        "description": "Maximum accuracy for critical items",
+        "recommended_for": "Top A-items only"
     }
-    
-    ACCURATE_MODE = {
-        'max_generations': 10,
-        'num_validations': 3,
-        'model_list': 'all',
-        'transformer_list': 'all',
-        'ensemble': 'all',
-        'models_to_validate': 0.35
+}
+
+# ---------- MODEL SETTINGS ----------
+MODEL_SETTINGS = {
+    "naive": {
+        "name": "Simple Average",
+        "description": "Uses recent average as forecast"
+    },
+    "seasonal_naive": {
+        "name": "Seasonal Pattern",
+        "description": "Repeats last year's pattern"
+    },
+    "exponential_smoothing": {
+        "name": "Smoothed Trend",
+        "description": "Weights recent data more heavily"
+    },
+    "arima": {
+        "name": "Statistical Model",
+        "description": "Captures trends and patterns"
+    },
+    "theta": {
+        "name": "Theta Method",
+        "description": "Combines trend extrapolation"
+    },
+    "prophet": {
+        "name": "Prophet",
+        "description": "Handles holidays and seasonality"
+    },
+    "lightgbm": {
+        "name": "Machine Learning",
+        "description": "Learns complex patterns"
+    },
+    "xgboost": {
+        "name": "Gradient Boosting",
+        "description": "Powerful pattern detection"
+    },
+    "ensemble": {
+        "name": "Combined Models",
+        "description": "Averages multiple forecasts"
     }
+}
+
+# ---------- FORECAST HORIZONS ----------
+FORECAST_HORIZONS = {
+    "short": {"days": 7, "label": "1 Week"},
+    "medium": {"days": 30, "label": "1 Month"},
+    "long": {"days": 90, "label": "3 Months"},
+    "extended": {"days": 180, "label": "6 Months"}
+}
+
+DEFAULT_HORIZON = "medium"
+
+# ============================================================================
+#                           ANOMALY DETECTION
+# ============================================================================
+
+# ---------- DETECTION METHODS ----------
+ANOMALY_DETECTION = {
+    "methods": {
+        "iqr": {
+            "name": "IQR Method",
+            "description": "Detects values outside normal range",
+            "multiplier": 1.5
+        },
+        "zscore": {
+            "name": "Z-Score Method",
+            "description": "Detects statistically unusual values",
+            "threshold": 3.0
+        },
+        "rolling": {
+            "name": "Rolling Window",
+            "description": "Detects sudden changes",
+            "window": 7,
+            "threshold": 2.5
+        }
+    },
+    "default_method": "iqr",
+    "min_anomaly_score": 0.7
+}
+
+# ---------- ANOMALY TYPES ----------
+ANOMALY_TYPES = {
+    "spike": "Unusual high value",
+    "drop": "Unusual low value",
+    "zero": "Unexpected zero sales",
+    "negative": "Negative value detected",
+    "gap": "Missing data period"
+}
+
+# ============================================================================
+#                              PERFORMANCE
+# ============================================================================
+
+# ---------- MEMORY MANAGEMENT ----------
+PERFORMANCE = {
+    "max_skus_in_memory": 1000,
+    "chunk_size": 1000,
+    "sample_size_visualization": 20,
+    "sample_size_heatmap": 100,
+    "background_threads": 4,
+    "cache_size_mb": 512,
+    "gc_threshold": 0.8  # trigger gc at 80% memory
+}
+
+# ---------- TIMING TARGETS ----------
+TIMING_TARGETS = {
+    "upload_per_10k": 150,      # seconds
+    "exploration_initial": 90,  # seconds
+    "feature_engineering": 150, # seconds
+    "simple_forecast": 600,     # seconds
+    "balanced_forecast": 1800,  # seconds
+    "advanced_forecast": 7200   # seconds
+}
+
+# ============================================================================
+#                                EXPORT
+# ============================================================================
+
+# ---------- EXPORT FORMATS ----------
+EXPORT_FORMATS = {
+    "csv": {
+        "name": "CSV File",
+        "extension": ".csv",
+        "description": "For ERP and data systems"
+    },
+    "excel": {
+        "name": "Excel Workbook",
+        "extension": ".xlsx",
+        "description": "For spreadsheet analysis"
+    },
+    "ppt": {
+        "name": "PowerPoint",
+        "extension": ".pptx",
+        "description": "For management presentations"
+    },
+    "pdf": {
+        "name": "PDF Report",
+        "extension": ".pdf",
+        "description": "For executive summary"
+    }
+}
+
+# ---------- PPT TEMPLATE ----------
+PPT_TEMPLATE = {
+    "slides": [
+        {"type": "title", "name": "Forecast Summary"},
+        {"type": "overview", "name": "Key Metrics"},
+        {"type": "details", "name": "Top Items Analysis"}
+    ],
+    "colors": {
+        "primary": "#2E86AB",
+        "secondary": "#A23B72",
+        "accent": "#F18F01",
+        "background": "#FFFFFF",
+        "text": "#1B1B1E"
+    }
+}
+
+# ============================================================================
+#                                  UI
+# ============================================================================
+
+# ---------- COLORS ----------
+UI_COLORS = {
+    "primary": "#2E86AB",
+    "secondary": "#A23B72",
+    "success": "#28A745",
+    "warning": "#FFC107",
+    "danger": "#DC3545",
+    "info": "#17A2B8",
+    "light": "#F8F9FA",
+    "dark": "#343A40",
+    "background": "#FFFFFF",
+    "surface": "#F5F5F5",
+    "border": "#DEE2E6"
+}
+
+# ---------- QUALITY SCORE COLORS ----------
+QUALITY_COLORS = {
+    "excellent": {"min": 90, "color": "#28A745"},
+    "good": {"min": 75, "color": "#8BC34A"},
+    "fair": {"min": 60, "color": "#FFC107"},
+    "poor": {"min": 40, "color": "#FF9800"},
+    "critical": {"min": 0, "color": "#DC3545"}
+}
+
+# ---------- TAB NAMES ----------
+TAB_NAMES = {
+    0: "Data Health",
+    1: "Pattern Discovery",
+    2: "Feature Engineering",
+    3: "Forecast Factory"
+}
+
+# ---------- PROGRESS MESSAGES ----------
+PROGRESS_MESSAGES = {
+    "loading": "Loading data...",
+    "detecting": "Detecting columns...",
+    "cleaning": "Cleaning data...",
+    "clustering": "Grouping items...",
+    "features": "Creating features...",
+    "forecasting": "Generating forecasts...",
+    "exporting": "Exporting results..."
+}
+
+# ============================================================================
+#                               LOGGING
+# ============================================================================
+
+# ---------- LOG SETTINGS ----------
+LOGGING = {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file_format": "stocksight_{date}.log",
+    "max_file_size_mb": 10,
+    "backup_count": 5
+}
 
 
-# ================ LARGE DATA SETTINGS ================
-
-class LargeDataConfig:
-    """
-    settings for handling large datasets
-    """
-    # ---------- THRESHOLDS ----------
-    MAX_ROWS = 100000
-    MAX_SKUS = 100
-    MAX_SKUS_CHART = 15
-    MAX_SKUS_DASHBOARD = 10
-    
-    # ---------- PARALLEL SETTINGS ----------
-    PARALLEL_THRESHOLD = 10
-    MAX_WORKERS = 8
-    
-    # ---------- SAMPLING ----------
-    SAMPLE_ROWS = 50000
-    KEEP_RECENT = True
-    
-    # ---------- MEMORY ----------
-    OPTIMIZE_DTYPES = True
-    FORCE_GC = True
-    
-    # ---------- CHART ----------
-    LOW_DPI = 60
-    MAX_CHART_HEIGHT = 50
+def ensure_directories():
+    # create required directories if missing
+    APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ================ GUI SETTINGS ================
-
-class GUIConfig:
-    """
-    dear pygui settings
-    """
-    # ---------- WINDOW SETTINGS ----------
-    WINDOW_TITLE = "Stocksight - Inventory Forecast"
-    WINDOW_WIDTH = 1400
-    WINDOW_HEIGHT = 800
-    
-    # ---------- PANEL SETTINGS ----------
-    LEFT_PANEL_WIDTH = 320
-    
-    # ---------- COLORS ----------
-    HEADER_COLOR = (255, 200, 100)
-    STATUS_COLOR = (150, 150, 150)
-    SUCCESS_COLOR = (100, 255, 100)
-    ERROR_COLOR = (255, 100, 100)
-    WARNING_COLOR = (255, 200, 100)
-    
-    # ---------- FONTS ----------
-    DEFAULT_FONT_SIZE = 14
-    HEADER_FONT_SIZE = 18
-    HELP_TEXT_SIZE = 12
+def get_quality_color(score):
+    # return color based on quality score
+    for level, config in QUALITY_COLORS.items():
+        if score >= config["min"]:
+            return config["color"]
+    return QUALITY_COLORS["critical"]["color"]
 
 
-# ================ CHART SETTINGS ================
-
-class ChartConfig:
-    """
-    matplotlib chart settings
-    """
-    # ---------- FIGURE SIZE ----------
-    FIGURE_WIDTH = 12
-    FIGURE_HEIGHT_PER_SKU = 3
-    
-    # ---------- DPI ----------
-    SAVE_DPI = 100
-    
-    # ---------- COLORS ----------
-    HISTORICAL_COLOR = 'blue'
-    FORECAST_COLOR = 'red'
-    CONFIDENCE_COLOR = 'lightcoral'
-    CONFIDENCE_ALPHA = 0.2
-    
-    # ---------- LINE STYLES ----------
-    HISTORICAL_STYLE = '-'
-    FORECAST_STYLE = '--'
-    
-    # ---------- LINE WIDTH ----------
-    LINE_WIDTH = 1.5
-    
-    # ---------- GRID ----------
-    GRID_ALPHA = 0.3
-
-
-# ================ SCENARIO SETTINGS ================
-
-class ScenarioConfig:
-    """
-    scenario simulation settings
-    """
-    # ---------- DEMAND SPIKE ----------
-    DEFAULT_SPIKE_MULTIPLIER = 1.5
-    MIN_SPIKE_MULTIPLIER = 0.1
-    MAX_SPIKE_MULTIPLIER = 10.0
-    
-    # ---------- SUPPLY DELAY ----------
-    DEFAULT_DELAY_DAYS = 7
-    MIN_DELAY_DAYS = 1
-    MAX_DELAY_DAYS = 90
-
-
-# ================ DATA SETTINGS ================
-
-class DataConfig:
-    """
-    data processing settings
-    """
-    # ---------- REQUIRED COLUMNS ----------
-    REQUIRED_COLUMNS = ['Date', 'SKU', 'Quantity']
-    
-    # ---------- OPTIONAL COLUMNS ----------
-    OPTIONAL_COLUMNS = ['Category', 'Warehouse', 'Price', 'Cost']
-    
-    # ---------- DATE FORMATS ----------
-    DATE_FORMATS = [
-        '%Y-%m-%d',
-        '%d-%m-%Y',
-        '%m/%d/%Y',
-        '%d/%m/%Y',
-        '%Y/%m/%d',
-        '%d %b %Y',
-        '%d %B %Y',
-        '%b %d, %Y',
-        '%B %d, %Y'
-    ]
-    
-    # ---------- GROUPING OPTIONS ----------
-    GROUP_OPTIONS = ['Daily', 'Weekly', 'Monthly', 'Quarterly']
-    
-    # ---------- PREVIEW ROWS ----------
-    PREVIEW_ROWS = 20
-    
-    # ---------- AGGREGATION ----------
-    DEFAULT_AGGREGATION = 'sum'
-    
-    # ---------- VALIDATION ----------
-    MIN_DATA_POINTS = 14
-    RECOMMENDED_DATA_POINTS = 60
-
-
-# ================ EXPORT SETTINGS ================
-
-class ExportConfig:
-    """
-    export settings
-    """
-    # ---------- TIMESTAMP FORMAT ----------
-    TIMESTAMP_FORMAT = '%Y%m%d_%H%M%S'
-    
-    # ---------- CSV SETTINGS ----------
-    CSV_INDEX = True
-    CSV_ENCODING = 'utf-8'
-    
-    # ---------- DEFAULT LOCATION ----------
-    USE_USER_DOCUMENTS = True
-    ALLOW_CUSTOM_LOCATION = True
-    
-    # ---------- EXPORT OPTIONS ----------
-    EXPORT_CHARTS = True
-    EXPORT_DATA = True
-    EXPORT_SUMMARY = True
-
-
-# ================ LOGGING SETTINGS ================
-
-class LogConfig:
-    """
-    logging configuration
-    """
-    # ---------- LOG LEVEL ----------
-    LOG_LEVEL = 'INFO'
-    
-    # ---------- FORMAT ----------
-    LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
-    DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-    
-    # ---------- FILE SETTINGS ----------
-    MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 mb
-    BACKUP_COUNT = 3
-
-
-# ================ INITIALIZATION ================
-
-def init_directories():
-    """
-    create all required directories
-    """
-    os.makedirs(Paths.DATA_DIR, exist_ok=True)
-    os.makedirs(Paths.OUTPUT_DIR, exist_ok=True)
-    os.makedirs(Paths.USER_OUTPUT, exist_ok=True)
+def get_cluster_label(volume_tier, pattern_type):
+    # create human readable cluster label
+    vol_label = CLUSTER_LABELS["volume"].get(volume_tier, volume_tier)
+    pat_label = CLUSTER_LABELS["pattern"].get(pattern_type, pattern_type)
+    return f"{vol_label} - {pat_label}"
