@@ -6,12 +6,12 @@ uses plain language for column types
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QComboBox, QPushButton, QGroupBox, QFormLayout,
-    QFrame, QScrollArea, QWidget
+    QComboBox, QPushButton, QGroupBox, QFrame,
+    QScrollArea, QWidget
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QColor
-from typing import Dict, List, Optional
+from PyQt5.QtGui import QFont
+from typing import Dict, List
 
 import config
 
@@ -25,6 +25,19 @@ class ColumnMappingDialog(QDialog):
     
     # signals
     mapping_confirmed = pyqtSignal(dict)
+    
+    # column definitions
+    REQUIRED_COLUMNS = [
+        ("date", "Date Column", "Which column contains your dates?"),
+        ("sku", "Item/SKU Column", "Which column identifies your items?"),
+        ("quantity", "Sales/Quantity Column", "Which column has the numbers to forecast?")
+    ]
+    
+    OPTIONAL_COLUMNS = [
+        ("category", "Category Column", "How are your items grouped?"),
+        ("price", "Price Column", "Price data helps detect price-driven demand changes"),
+        ("promo", "Promotion Column", "Promotion flags help explain demand spikes")
+    ]
     
     def __init__(self, columns: List[str], detections: Dict, parent=None):
         # initialize dialog
@@ -43,7 +56,7 @@ class ColumnMappingDialog(QDialog):
         # setup user interface
         self.setWindowTitle("Map Your Columns")
         self.setMinimumWidth(550)
-        self.setMinimumHeight(450)
+        self.setMinimumHeight(480)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -53,57 +66,48 @@ class ColumnMappingDialog(QDialog):
         header.setFont(QFont("Segoe UI", 12, QFont.Bold))
         layout.addWidget(header)
         
-        desc = QLabel("We've detected your columns automatically. Please confirm or adjust the mappings below.")
+        desc = QLabel(
+            "We've detected your columns automatically. "
+            "Please confirm or adjust the mappings below."
+        )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: gray;")
+        desc.setStyleSheet("color: #666;")
         layout.addWidget(desc)
         
         # separator
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color: #ddd;")
+        line.setStyleSheet("background-color: #ddd;")
         layout.addWidget(line)
         
-        # scroll area for mappings
+        # scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
-        scroll_layout.setSpacing(15)
+        scroll_layout.setSpacing(10)
         
         # required columns
         required_group = QGroupBox("Required Columns")
-        required_layout = QFormLayout(required_group)
-        required_layout.setSpacing(10)
+        required_layout = QVBoxLayout(required_group)
+        required_layout.setSpacing(12)
         
-        required_mappings = [
-            ("date", "Date Column", "Which column contains dates?"),
-            ("sku", "Item/SKU Column", "Which column identifies your items?"),
-            ("quantity", "Sales/Quantity Column", "Which column has the numbers to forecast?")
-        ]
-        
-        for key, label, hint in required_mappings:
+        for key, label, hint in self.REQUIRED_COLUMNS:
             row = self._create_mapping_row(key, label, hint, required=True)
-            required_layout.addRow(row)
+            required_layout.addWidget(row)
         
         scroll_layout.addWidget(required_group)
         
         # optional columns
         optional_group = QGroupBox("Optional Columns (Influence Factors)")
-        optional_layout = QFormLayout(optional_group)
-        optional_layout.setSpacing(10)
+        optional_layout = QVBoxLayout(optional_group)
+        optional_layout.setSpacing(12)
         
-        optional_mappings = [
-            ("category", "Category Column", "How are your items grouped?"),
-            ("price", "Price Column", "Price can affect demand"),
-            ("promo", "Promotion Column", "Promotions impact sales")
-        ]
-        
-        for key, label, hint in optional_mappings:
+        for key, label, hint in self.OPTIONAL_COLUMNS:
             row = self._create_mapping_row(key, label, hint, required=False)
-            optional_layout.addRow(row)
+            optional_layout.addWidget(row)
         
         scroll_layout.addWidget(optional_group)
         scroll_layout.addStretch()
@@ -111,9 +115,15 @@ class ColumnMappingDialog(QDialog):
         scroll.setWidget(scroll_widget)
         layout.addWidget(scroll)
         
+        # info label
+        info_label = QLabel(f"📊 Found {len(self._columns)} columns in your data")
+        info_label.setStyleSheet("color: #666; font-size: 10px;")
+        layout.addWidget(info_label)
+        
         # validation message
         self._validation_label = QLabel("")
-        self._validation_label.setStyleSheet("color: red;")
+        self._validation_label.setStyleSheet("color: #DC3545;")
+        self._validation_label.setWordWrap(True)
         layout.addWidget(self._validation_label)
         
         # buttons
@@ -126,6 +136,19 @@ class ColumnMappingDialog(QDialog):
         
         confirm_btn = QPushButton("Confirm Mapping")
         confirm_btn.setDefault(True)
+        confirm_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {config.UI_COLORS['primary']};
+                color: white;
+                border: none;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #3A9CC0;
+            }}
+        """)
         confirm_btn.clicked.connect(self._on_confirm)
         button_layout.addWidget(confirm_btn)
         
@@ -136,7 +159,7 @@ class ColumnMappingDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(4)
         
         # label with required indicator
         label_text = f"{label} *" if required else label
@@ -146,11 +169,13 @@ class ColumnMappingDialog(QDialog):
         
         # hint
         hint_label = QLabel(hint)
-        hint_label.setStyleSheet("color: gray; font-size: 10px;")
+        hint_label.setStyleSheet("color: #666; font-size: 9pt;")
+        hint_label.setWordWrap(True)
         layout.addWidget(hint_label)
         
         # combo and confidence
         combo_layout = QHBoxLayout()
+        combo_layout.setSpacing(10)
         
         combo = QComboBox()
         combo.addItem("-- Not Mapped --", None)
@@ -160,7 +185,7 @@ class ColumnMappingDialog(QDialog):
         combo_layout.addWidget(combo)
         
         confidence_label = QLabel("")
-        confidence_label.setMinimumWidth(100)
+        confidence_label.setMinimumWidth(120)
         combo_layout.addWidget(confidence_label)
         
         combo_layout.addStretch()
@@ -176,14 +201,16 @@ class ColumnMappingDialog(QDialog):
         
         return widget
     
+    # ---------- DETECTION ----------
+    
     def _populate_detections(self) -> None:
         # populate combos with detected mappings
-        # find best column for each type
         best_mapping = {}
         used_columns = set()
         
         # priority order
-        priority = ["date", "sku", "quantity", "category", "price", "promo"]
+        all_columns = self.REQUIRED_COLUMNS + self.OPTIONAL_COLUMNS
+        priority = [col[0] for col in all_columns]
         
         for col_type in priority:
             if col_type not in self._combos:
@@ -205,7 +232,7 @@ class ColumnMappingDialog(QDialog):
                 best_mapping[col_type] = (best_col, best_score)
                 used_columns.add(best_col)
         
-        # apply mappings to combos
+        # apply mappings
         for col_type, combo_info in self._combos.items():
             combo = combo_info["combo"]
             confidence_label = combo_info["confidence"]
@@ -213,7 +240,7 @@ class ColumnMappingDialog(QDialog):
             if col_type in best_mapping:
                 col, score = best_mapping[col_type]
                 
-                # select column in combo
+                # select in combo
                 index = combo.findData(col)
                 if index >= 0:
                     combo.setCurrentIndex(index)
@@ -227,8 +254,8 @@ class ColumnMappingDialog(QDialog):
                     color = config.UI_COLORS["warning"]
                     text = f"? {confidence_pct}% confident"
                 else:
-                    color = config.UI_COLORS["danger"]
-                    text = f"! {confidence_pct}% confident"
+                    color = "#666"
+                    text = f"? {confidence_pct}% confident"
                 
                 confidence_label.setText(text)
                 confidence_label.setStyleSheet(f"color: {color};")
@@ -251,7 +278,7 @@ class ColumnMappingDialog(QDialog):
                 errors.append(f"{col_type.title()} column is required")
             elif selected is not None:
                 if selected in used:
-                    errors.append(f"Column '{selected}' is used multiple times")
+                    errors.append(f"Column '{selected}' is mapped twice")
                 else:
                     used.add(selected)
                     mapping[col_type] = selected

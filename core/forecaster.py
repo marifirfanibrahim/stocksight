@@ -1,7 +1,7 @@
 """
 forecaster module
 generates forecasts using multiple strategies
-supports simple balanced and advanced approaches
+supports daily weekly and monthly frequencies
 """
 
 import pandas as pd
@@ -29,6 +29,7 @@ class ForecastResult:
     lower_bound: List[float]
     upper_bound: List[float]
     metrics: Dict[str, float]
+    frequency: str = "D"  # D=daily, W=weekly, M=monthly
 
 
 # ============================================================================
@@ -38,12 +39,63 @@ class ForecastResult:
 class Forecaster:
     # generates forecasts using configurable strategies
     
+    # ---------- FREQUENCY MAPPINGS ----------
+    FREQUENCY_MAP = {
+        "daily": "D",
+        "weekly": "W",
+        "monthly": "M"
+    }
+    
+    FREQUENCY_LABELS = {
+        "D": "Daily",
+        "W": "Weekly",
+        "M": "Monthly"
+    }
+    
     def __init__(self):
         # initialize with forecast configuration
         self.config = config.FORECASTING
         self.model_settings = config.MODEL_SETTINGS
         self.results = {}
         self.best_models = {}
+    
+    # ---------- DATA AGGREGATION ----------
+    
+    def aggregate_to_frequency(self,
+                                df: pd.DataFrame,
+                                date_col: str,
+                                qty_col: str,
+                                frequency: str = "D") -> pd.DataFrame:
+        # aggregate data to specified frequency
+        result = df.copy()
+        result[date_col] = pd.to_datetime(result[date_col])
+        result = result.set_index(date_col)
+        
+        if frequency == "D":
+            # daily - no aggregation needed, just resample to fill gaps
+            aggregated = result[qty_col].resample("D").sum()
+        elif frequency == "W":
+            # weekly aggregation
+            aggregated = result[qty_col].resample("W").sum()
+        elif frequency == "M":
+            # monthly aggregation
+            aggregated = result[qty_col].resample("M").sum()
+        else:
+            # default to daily
+            aggregated = result[qty_col].resample("D").sum()
+        
+        return aggregated.to_frame().reset_index()
+    
+    def get_horizon_periods(self, horizon_days: int, frequency: str = "D") -> int:
+        # convert horizon days to periods based on frequency
+        if frequency == "D":
+            return horizon_days
+        elif frequency == "W":
+            return max(1, horizon_days // 7)
+        elif frequency == "M":
+            return max(1, horizon_days // 30)
+        else:
+            return horizon_days
     
     # ---------- MAIN FORECASTING ----------
     
@@ -53,24 +105,32 @@ class Forecaster:
                  qty_col: str,
                  strategy: str = "simple",
                  horizon: int = 30,
+                 frequency: str = "D",
                  features: Optional[List[str]] = None) -> ForecastResult:
         # generate forecast for single time series
+        
+        # aggregate data to frequency
+        aggregated = self.aggregate_to_frequency(df, date_col, qty_col, frequency)
         
         # get models for strategy
         models = self.config[strategy]["models"]
         
         # prepare data
-        ts = df[[date_col, qty_col]].copy()
+        ts = aggregated.copy()
+        ts.columns = [date_col, qty_col]
         ts[date_col] = pd.to_datetime(ts[date_col])
         ts = ts.sort_values(date_col).set_index(date_col)
         ts = ts[qty_col]
+        
+        # convert horizon to periods
+        horizon_periods = self.get_horizon_periods(horizon, frequency)
         
         # run each model and select best
         model_results = {}
         
         for model_name in models:
             try:
-                result = self._run_model(ts, model_name, horizon, features, df)
+                result = self._run_model(ts, model_name, horizon_periods, frequency, features, df)
                 if result is not None:
                     model_results[model_name] = result
             except Exception as e:
@@ -80,7 +140,7 @@ class Forecaster:
         # select best model based on metrics
         if not model_results:
             # fallback to naive if all models fail
-            result = self._naive_forecast(ts, horizon)
+            result = self._naive_forecast(ts, horizon_periods, frequency)
             return ForecastResult(
                 sku="",
                 model="naive",
@@ -88,7 +148,8 @@ class Forecaster:
                 dates=result["dates"],
                 lower_bound=result["lower"],
                 upper_bound=result["upper"],
-                metrics=result["metrics"]
+                metrics=result["metrics"],
+                frequency=frequency
             )
         
         best_model = min(model_results.keys(), key=lambda x: model_results[x]["metrics"].get("mape", float("inf")))
@@ -101,47 +162,53 @@ class Forecaster:
             dates=best_result["dates"],
             lower_bound=best_result["lower"],
             upper_bound=best_result["upper"],
-            metrics=best_result["metrics"]
+            metrics=best_result["metrics"],
+            frequency=frequency
         )
     
     def _run_model(self, 
                    ts: pd.Series, 
                    model_name: str, 
                    horizon: int,
+                   frequency: str = "D",
                    features: Optional[List[str]] = None,
                    full_df: Optional[pd.DataFrame] = None) -> Optional[Dict]:
         # run specific forecasting model
         
         if model_name == "naive":
-            return self._naive_forecast(ts, horizon)
+            return self._naive_forecast(ts, horizon, frequency)
         elif model_name == "seasonal_naive":
-            return self._seasonal_naive_forecast(ts, horizon)
+            return self._seasonal_naive_forecast(ts, horizon, frequency)
         elif model_name == "exponential_smoothing":
-            return self._exponential_smoothing_forecast(ts, horizon)
+            return self._exponential_smoothing_forecast(ts, horizon, frequency)
         elif model_name == "arima":
-            return self._arima_forecast(ts, horizon)
+            return self._arima_forecast(ts, horizon, frequency)
         elif model_name == "theta":
-            return self._theta_forecast(ts, horizon)
+            return self._theta_forecast(ts, horizon, frequency)
         elif model_name == "prophet":
-            return self._prophet_forecast(ts, horizon)
+            return self._prophet_forecast(ts, horizon, frequency)
         elif model_name == "lightgbm":
-            return self._lightgbm_forecast(ts, horizon, features, full_df)
+            return self._lightgbm_forecast(ts, horizon, frequency, features, full_df)
         elif model_name == "xgboost":
-            return self._xgboost_forecast(ts, horizon, features, full_df)
+            return self._xgboost_forecast(ts, horizon, frequency, features, full_df)
         elif model_name == "ensemble":
-            return self._ensemble_forecast(ts, horizon, features, full_df)
+            return self._ensemble_forecast(ts, horizon, frequency, features, full_df)
         else:
             return None
     
     # ---------- SIMPLE MODELS ----------
     
-    def _naive_forecast(self, ts: pd.Series, horizon: int) -> Dict:
+    def _naive_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
         # naive forecast using last value
         last_value = ts.iloc[-1] if len(ts) > 0 else 0
         last_date = ts.index[-1] if len(ts) > 0 else pd.Timestamp.now()
         
-        # generate forecast dates
-        forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+        # generate forecast dates based on frequency
+        forecast_dates = pd.date_range(
+            start=last_date + pd.Timedelta(days=1), 
+            periods=horizon, 
+            freq=frequency
+        )
         
         # forecast is constant
         forecast = [float(last_value)] * horizon
@@ -162,12 +229,26 @@ class Forecaster:
             "metrics": metrics
         }
     
-    def _seasonal_naive_forecast(self, ts: pd.Series, horizon: int, season_length: int = 7) -> Dict:
-        # seasonal naive using same day last period
+    def _seasonal_naive_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
+        # seasonal naive using same period last cycle
         last_date = ts.index[-1] if len(ts) > 0 else pd.Timestamp.now()
         
+        # determine season length based on frequency
+        if frequency == "D":
+            season_length = 7  # weekly seasonality
+        elif frequency == "W":
+            season_length = 52  # yearly seasonality
+        elif frequency == "M":
+            season_length = 12  # yearly seasonality
+        else:
+            season_length = 7
+        
         # generate forecast dates
-        forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+        forecast_dates = pd.date_range(
+            start=last_date + pd.Timedelta(days=1), 
+            periods=horizon, 
+            freq=frequency
+        )
         
         # get seasonal values
         forecast = []
@@ -195,24 +276,43 @@ class Forecaster:
             "metrics": metrics
         }
     
-    def _exponential_smoothing_forecast(self, ts: pd.Series, horizon: int) -> Dict:
+    def _exponential_smoothing_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
         # exponential smoothing with trend and seasonality
         try:
             from statsmodels.tsa.holtwinters import ExponentialSmoothing
             
+            # determine seasonal period based on frequency
+            if frequency == "D":
+                seasonal_periods = 7
+                min_obs = 14
+            elif frequency == "W":
+                seasonal_periods = 52
+                min_obs = 104
+            elif frequency == "M":
+                seasonal_periods = 12
+                min_obs = 24
+            else:
+                seasonal_periods = 7
+                min_obs = 14
+            
             # fit model
+            use_seasonal = len(ts) >= min_obs
             model = ExponentialSmoothing(
                 ts,
                 trend="add",
-                seasonal="add" if len(ts) >= 14 else None,
-                seasonal_periods=7 if len(ts) >= 14 else None
+                seasonal="add" if use_seasonal else None,
+                seasonal_periods=seasonal_periods if use_seasonal else None
             )
             fitted = model.fit(optimized=True)
             
             # generate forecast
             forecast_result = fitted.forecast(horizon)
             last_date = ts.index[-1]
-            forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+            forecast_dates = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=horizon, 
+                freq=frequency
+            )
             
             forecast = [max(0, float(v)) for v in forecast_result.values]
             
@@ -233,11 +333,11 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
-            return self._naive_forecast(ts, horizon)
+            return self._naive_forecast(ts, horizon, frequency)
     
     # ---------- BALANCED MODELS ----------
     
-    def _arima_forecast(self, ts: pd.Series, horizon: int) -> Dict:
+    def _arima_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
         # arima model with automatic order selection
         try:
             from statsmodels.tsa.arima.model import ARIMA
@@ -249,7 +349,11 @@ class Forecaster:
             # generate forecast with confidence intervals
             forecast_result = fitted.get_forecast(steps=horizon)
             last_date = ts.index[-1]
-            forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+            forecast_dates = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=horizon, 
+                freq=frequency
+            )
             
             forecast = [max(0, float(v)) for v in forecast_result.predicted_mean.values]
             conf_int = forecast_result.conf_int()
@@ -267,9 +371,9 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
-            return self._exponential_smoothing_forecast(ts, horizon)
+            return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
-    def _theta_forecast(self, ts: pd.Series, horizon: int) -> Dict:
+    def _theta_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
         # theta method forecast
         try:
             from statsmodels.tsa.forecasting.theta import ThetaModel
@@ -279,7 +383,11 @@ class Forecaster:
             
             forecast_result = fitted.forecast(horizon)
             last_date = ts.index[-1]
-            forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+            forecast_dates = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=horizon, 
+                freq=frequency
+            )
             
             forecast = [max(0, float(v)) for v in forecast_result.values]
             
@@ -300,9 +408,9 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
-            return self._exponential_smoothing_forecast(ts, horizon)
+            return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
-    def _prophet_forecast(self, ts: pd.Series, horizon: int) -> Dict:
+    def _prophet_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
         # prophet model for time series
         try:
             from prophet import Prophet
@@ -313,16 +421,16 @@ class Forecaster:
                 "y": ts.values
             })
             
-            # fit model
+            # fit model with frequency-appropriate settings
             model = Prophet(
                 yearly_seasonality=True,
-                weekly_seasonality=True,
+                weekly_seasonality=(frequency == "D"),
                 daily_seasonality=False
             )
             model.fit(df_prophet)
             
             # generate future dates
-            future = model.make_future_dataframe(periods=horizon)
+            future = model.make_future_dataframe(periods=horizon, freq=frequency)
             forecast_result = model.predict(future)
             
             # extract forecast
@@ -344,13 +452,14 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
-            return self._exponential_smoothing_forecast(ts, horizon)
+            return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     # ---------- ADVANCED MODELS ----------
     
     def _lightgbm_forecast(self, 
                            ts: pd.Series, 
                            horizon: int,
+                           frequency: str = "D",
                            features: Optional[List[str]] = None,
                            full_df: Optional[pd.DataFrame] = None) -> Dict:
         # lightgbm model with features
@@ -389,7 +498,11 @@ class Forecaster:
             
             # dates
             last_date = ts.index[-1]
-            forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+            forecast_dates = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=horizon, 
+                freq=frequency
+            )
             
             # confidence interval
             std = ts.std()
@@ -408,11 +521,12 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
-            return self._exponential_smoothing_forecast(ts, horizon)
+            return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     def _xgboost_forecast(self,
                           ts: pd.Series,
                           horizon: int,
+                          frequency: str = "D",
                           features: Optional[List[str]] = None,
                           full_df: Optional[pd.DataFrame] = None) -> Dict:
         # xgboost model with features
@@ -449,7 +563,11 @@ class Forecaster:
             
             # dates
             last_date = ts.index[-1]
-            forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+            forecast_dates = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=horizon, 
+                freq=frequency
+            )
             
             # confidence interval
             std = ts.std()
@@ -468,11 +586,12 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
-            return self._exponential_smoothing_forecast(ts, horizon)
+            return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     def _ensemble_forecast(self,
                            ts: pd.Series,
                            horizon: int,
+                           frequency: str = "D",
                            features: Optional[List[str]] = None,
                            full_df: Optional[pd.DataFrame] = None) -> Dict:
         # ensemble of multiple models
@@ -483,7 +602,7 @@ class Forecaster:
         
         for model_name in models_to_combine:
             try:
-                result = self._run_model(ts, model_name, horizon, features, full_df)
+                result = self._run_model(ts, model_name, horizon, frequency, features, full_df)
                 if result is not None:
                     all_forecasts.append(result["forecast"])
                     all_metrics.append(result["metrics"])
@@ -491,14 +610,18 @@ class Forecaster:
                 continue
         
         if not all_forecasts:
-            return self._naive_forecast(ts, horizon)
+            return self._naive_forecast(ts, horizon, frequency)
         
         # combine forecasts using simple average
         ensemble_forecast = np.mean(all_forecasts, axis=0).tolist()
         
         # dates
         last_date = ts.index[-1]
-        forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
+        forecast_dates = pd.date_range(
+            start=last_date + pd.Timedelta(days=1), 
+            periods=horizon, 
+            freq=frequency
+        )
         
         # confidence interval
         std = np.std(all_forecasts, axis=0)
@@ -586,6 +709,7 @@ class Forecaster:
                        qty_col: str,
                        strategy: str = "simple",
                        horizon: int = 30,
+                       frequency: str = "D",
                        tier_mapping: Optional[Dict[str, str]] = None,
                        features: Optional[List[str]] = None,
                        progress_callback: Optional[callable] = None) -> Dict[str, ForecastResult]:
@@ -611,13 +735,18 @@ class Forecaster:
             
             # generate forecast
             try:
-                result = self.forecast(sku_df, date_col, qty_col, sku_strategy, horizon, features)
+                result = self.forecast(
+                    sku_df, date_col, qty_col, 
+                    sku_strategy, horizon, frequency, features
+                )
                 result.sku = sku
                 results[sku] = result
             except Exception:
                 # fallback to naive
-                ts = sku_df.set_index(date_col)[qty_col]
-                naive_result = self._naive_forecast(ts, horizon)
+                aggregated = self.aggregate_to_frequency(sku_df, date_col, qty_col, frequency)
+                ts = aggregated.set_index(aggregated.columns[0])[aggregated.columns[1]]
+                horizon_periods = self.get_horizon_periods(horizon, frequency)
+                naive_result = self._naive_forecast(ts, horizon_periods, frequency)
                 results[sku] = ForecastResult(
                     sku=sku,
                     model="naive",
@@ -625,7 +754,8 @@ class Forecaster:
                     dates=naive_result["dates"],
                     lower_bound=naive_result["lower"],
                     upper_bound=naive_result["upper"],
-                    metrics=naive_result["metrics"]
+                    metrics=naive_result["metrics"],
+                    frequency=frequency
                 )
             
             # progress callback
@@ -650,8 +780,10 @@ class Forecaster:
             data.append({
                 "sku": sku,
                 "model": result.model,
+                "frequency": self.FREQUENCY_LABELS.get(result.frequency, result.frequency),
+                "periods": len(result.forecast),
                 "total_forecast": total_forecast,
-                "avg_daily_forecast": avg_forecast,
+                "avg_period_forecast": avg_forecast,
                 "mape": result.metrics.get("mape", 0),
                 "mae": result.metrics.get("mae", 0),
                 "forecast_start": result.dates[0] if result.dates else "",

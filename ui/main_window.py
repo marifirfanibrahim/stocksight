@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QLabel, QProgressBar, QToolBar
 )
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont, QIcon, QKeySequence
+from PyQt5.QtGui import QFont, QKeySequence
 from typing import Optional
 
 import config
@@ -20,6 +20,7 @@ from ui.tabs.explore_tab import ExploreTab
 from ui.tabs.features_tab import FeaturesTab
 from ui.tabs.forecast_tab import ForecastTab
 from ui.dialogs.about_dialog import AboutDialog
+from ui.dialogs.welcome_dialog import WelcomeDialog
 from utils.memory_manager import MemoryManager
 
 
@@ -46,6 +47,9 @@ class MainWindow(QMainWindow):
         
         # start memory monitor
         self._start_memory_monitor()
+        
+        # show welcome dialog after window is shown
+        QTimer.singleShot(100, self._show_welcome_dialog)
     
     # ---------- WINDOW SETUP ----------
     
@@ -117,6 +121,13 @@ class MainWindow(QMainWindow):
         
         # help menu
         help_menu = menubar.addMenu("&Help")
+        
+        welcome_action = QAction("&Quick Start Guide", self)
+        welcome_action.setShortcut("F1")
+        welcome_action.triggered.connect(self._show_welcome_dialog)
+        help_menu.addAction(welcome_action)
+        
+        help_menu.addSeparator()
         
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
@@ -264,13 +275,20 @@ class MainWindow(QMainWindow):
         # session signals
         self._session.state_changed.connect(self._on_session_changed)
     
+    # ---------- WELCOME DIALOG ----------
+    
+    def _show_welcome_dialog(self) -> None:
+        # show welcome dialog
+        dialog = WelcomeDialog(self)
+        dialog.exec_()
+    
     # ---------- MEMORY MONITORING ----------
     
     def _start_memory_monitor(self) -> None:
         # start memory monitoring timer
         self._memory_timer = QTimer(self)
         self._memory_timer.timeout.connect(self._update_memory_display)
-        self._memory_timer.start(5000)  # update every 5 seconds
+        self._memory_timer.start(5000)
     
     def _update_memory_display(self) -> None:
         # update memory usage display
@@ -347,7 +365,6 @@ class MainWindow(QMainWindow):
     def _on_navigate_to_data(self, sku: str) -> None:
         # handle navigation to data tab for correction
         self._data_tab.add_flagged_sku(sku)
-        # don't switch tab automatically - user may want to continue reviewing
     
     # ---------- UI UPDATES ----------
     

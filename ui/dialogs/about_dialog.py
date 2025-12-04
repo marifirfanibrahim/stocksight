@@ -85,7 +85,7 @@ class AboutDialog(QDialog):
         layout.addWidget(line2)
         
         # copyright
-        copyright_label = QLabel(f"© 2024 {config.APP_AUTHOR}")
+        copyright_label = QLabel(f"© 2025 {config.APP_AUTHOR}")
         copyright_label.setAlignment(Qt.AlignCenter)
         copyright_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(copyright_label)

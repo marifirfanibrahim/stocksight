@@ -31,8 +31,9 @@ class ForecastSettingsDialog(QDialog):
         super().__init__(parent)
         
         self._sku_count = sku_count
-        self._horizon_spin = None  # initialize before setup
+        self._horizon_spin = None
         self._strategy_group = None
+        self._frequency_combo = None
         self._tier_processing = None
         self._include_intervals = None
         self._model_comparison = None
@@ -46,8 +47,8 @@ class ForecastSettingsDialog(QDialog):
     def _setup_ui(self) -> None:
         # setup user interface
         self.setWindowTitle("Forecast Settings")
-        self.setMinimumWidth(550)
-        self.setMinimumHeight(500)
+        self.setMinimumWidth(580)
+        self.setMinimumHeight(580)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -65,8 +66,8 @@ class ForecastSettingsDialog(QDialog):
         line.setFrameShape(QFrame.HLine)
         layout.addWidget(line)
         
-        # horizon selection
-        layout.addWidget(self._create_horizon_group())
+        # frequency and horizon
+        layout.addWidget(self._create_frequency_group())
         
         # additional options
         layout.addWidget(self._create_options_group())
@@ -139,29 +140,56 @@ class ForecastSettingsDialog(QDialog):
         
         return group
     
-    def _create_horizon_group(self) -> QGroupBox:
-        # create forecast horizon group
-        group = QGroupBox("Forecast Horizon")
-        layout = QHBoxLayout(group)
+    def _create_frequency_group(self) -> QGroupBox:
+        # create frequency and horizon group
+        group = QGroupBox("Forecast Frequency & Horizon")
+        layout = QVBoxLayout(group)
         
-        layout.addWidget(QLabel("Forecast for the next"))
+        # frequency selector
+        freq_layout = QHBoxLayout()
+        freq_layout.addWidget(QLabel("Forecast at:"))
+        
+        self._frequency_combo = QComboBox()
+        self._frequency_combo.addItems([
+            "Daily (day-by-day)",
+            "Weekly (week totals)",
+            "Monthly (month totals)"
+        ])
+        self._frequency_combo.currentIndexChanged.connect(self._on_frequency_changed)
+        freq_layout.addWidget(self._frequency_combo)
+        
+        freq_layout.addStretch()
+        layout.addLayout(freq_layout)
+        
+        # horizon selector
+        horizon_layout = QHBoxLayout()
+        horizon_layout.addWidget(QLabel("Forecast horizon:"))
         
         self._horizon_spin = QSpinBox()
         self._horizon_spin.setRange(7, 365)
         self._horizon_spin.setValue(30)
         self._horizon_spin.setSuffix(" days")
         self._horizon_spin.valueChanged.connect(self._update_estimate)
-        layout.addWidget(self._horizon_spin)
+        horizon_layout.addWidget(self._horizon_spin)
         
-        layout.addStretch()
+        horizon_layout.addStretch()
         
         # quick select buttons
-        for days, label in [(7, "1W"), (30, "1M"), (90, "3M"), (180, "6M")]:
+        for days, label in [(7, "1W"), (30, "1M"), (90, "3M"), (180, "6M"), (365, "1Y")]:
             btn = QPushButton(label)
-            btn.setMaximumWidth(50)
+            btn.setMaximumWidth(45)
             btn.setProperty("days", days)
             btn.clicked.connect(self._set_horizon_from_button)
-            layout.addWidget(btn)
+            horizon_layout.addWidget(btn)
+        
+        layout.addLayout(horizon_layout)
+        
+        # periods info label
+        self._periods_label = QLabel("")
+        self._periods_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(self._periods_label)
+        
+        self._update_periods_label()
         
         return group
     
@@ -214,6 +242,46 @@ class ForecastSettingsDialog(QDialog):
                 return selected.property("strategy_key")
         return "balanced"
     
+    def _get_selected_frequency(self) -> str:
+        # get currently selected frequency
+        if self._frequency_combo:
+            text = self._frequency_combo.currentText()
+            if "Daily" in text:
+                return "D"
+            elif "Weekly" in text:
+                return "W"
+            elif "Monthly" in text:
+                return "M"
+        return "D"
+    
+    def _on_frequency_changed(self) -> None:
+        # handle frequency change
+        self._update_periods_label()
+        self._update_estimate()
+    
+    def _update_periods_label(self) -> None:
+        # update periods info label
+        if not self._horizon_spin or not self._periods_label:
+            return
+        
+        horizon = self._horizon_spin.value()
+        frequency = self._get_selected_frequency()
+        
+        if frequency == "D":
+            periods = horizon
+            period_text = "days"
+        elif frequency == "W":
+            periods = max(1, horizon // 7)
+            period_text = "weeks"
+        elif frequency == "M":
+            periods = max(1, horizon // 30)
+            period_text = "months"
+        else:
+            periods = horizon
+            period_text = "periods"
+        
+        self._periods_label.setText(f"This will generate {periods} {period_text} of forecasts")
+    
     def _update_estimate(self) -> None:
         # update time estimate label
         if not self._estimate_label or not self._horizon_spin:
@@ -221,22 +289,25 @@ class ForecastSettingsDialog(QDialog):
         
         strategy = self._get_selected_strategy()
         horizon = self._horizon_spin.value()
+        frequency = self._get_selected_frequency()
         
         # get base time from config
         strategy_info = config.FORECASTING.get(strategy, {})
         time_str = strategy_info.get("time_estimate", "Unknown")
         
-        # adjust estimate based on sku count
+        # adjust estimate based on sku count and frequency
         if self._sku_count > 0:
-            # simple scaling
             scale_factor = self._sku_count / 10000
             
+            # frequency affects processing time
+            freq_factor = {"D": 1.0, "W": 0.6, "M": 0.4}.get(frequency, 1.0)
+            
             if strategy == "simple":
-                minutes = 5 + (5 * scale_factor)
+                minutes = (5 + (5 * scale_factor)) * freq_factor
             elif strategy == "balanced":
-                minutes = 20 + (10 * scale_factor)
+                minutes = (20 + (10 * scale_factor)) * freq_factor
             else:  # advanced
-                minutes = 60 + (60 * scale_factor)
+                minutes = (60 + (60 * scale_factor)) * freq_factor
             
             if minutes < 60:
                 time_estimate = f"~{int(minutes)} minutes"
@@ -253,16 +324,33 @@ class ForecastSettingsDialog(QDialog):
         models = strategy_info.get("models", [])
         model_count = len(models)
         
+        # frequency label
+        freq_labels = {"D": "daily", "W": "weekly", "M": "monthly"}
+        freq_label = freq_labels.get(frequency, "daily")
+        
+        # calculate periods
+        if frequency == "D":
+            periods = horizon
+        elif frequency == "W":
+            periods = max(1, horizon // 7)
+        elif frequency == "M":
+            periods = max(1, horizon // 30)
+        else:
+            periods = horizon
+        
         message = (
             f"📊 Estimated time: {time_estimate} for {sku_text}\n"
             f"🔧 Using {model_count} forecasting models\n"
-            f"📅 Generating {horizon}-day forecasts"
+            f"📅 Generating {periods} {freq_label} forecast periods"
         )
         
         if self._tier_processing and self._tier_processing.isChecked():
             message += "\n✓ Tier-based processing enabled (faster for large datasets)"
         
         self._estimate_label.setText(message)
+        
+        # update periods label
+        self._update_periods_label()
     
     # ---------- ACTIONS ----------
     
@@ -277,6 +365,7 @@ class ForecastSettingsDialog(QDialog):
         return {
             "strategy": self._get_selected_strategy(),
             "horizon": self._horizon_spin.value() if self._horizon_spin else 30,
+            "frequency": self._get_selected_frequency(),
             "tier_processing": self._tier_processing.isChecked() if self._tier_processing else True,
             "include_intervals": self._include_intervals.isChecked() if self._include_intervals else True,
             "model_comparison": self._model_comparison.isChecked() if self._model_comparison else False,

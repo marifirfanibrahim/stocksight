@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QPushButton, QLabel, QHeaderView,
     QMenu, QAction, QAbstractItemView
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QSortFilterProxyModel
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 from typing import Optional, List
 import pandas as pd
@@ -28,6 +28,9 @@ class VirtualDataTable(QWidget):
     row_selected = pyqtSignal(dict)
     row_double_clicked = pyqtSignal(dict)
     selection_changed = pyqtSignal(list)
+    
+    # ---------- CONSTANTS ----------
+    DEFAULT_ROW_HEIGHT = 32
     
     def __init__(self, parent=None):
         # initialize table widget
@@ -83,9 +86,12 @@ class VirtualDataTable(QWidget):
         # optimize for large datasets
         self._table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self._table.verticalHeader().setDefaultSectionSize(25)
         self._table.horizontalHeader().setStretchLastSection(True)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._table.horizontalHeader().setMinimumSectionSize(60)
+        
+        # set row height
+        self._table.verticalHeader().setDefaultSectionSize(self.DEFAULT_ROW_HEIGHT)
         
         layout.addWidget(self._table)
     
@@ -180,11 +186,17 @@ class VirtualDataTable(QWidget):
         # resize columns to content
         self._table.resizeColumnsToContents()
         
-        # limit max width
+        # ensure minimum and maximum widths
         header = self._table.horizontalHeader()
         for i in range(header.count()):
-            if header.sectionSize(i) > 200:
-                header.resizeSection(i, 200)
+            current_size = header.sectionSize(i)
+            
+            # set minimum width
+            if current_size < 60:
+                header.resizeSection(i, 60)
+            # set maximum width
+            elif current_size > 250:
+                header.resizeSection(i, 250)
     
     # ---------- EVENT HANDLERS ----------
     

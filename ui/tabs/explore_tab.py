@@ -19,6 +19,7 @@ from core.anomaly_detector import AnomalyDetector
 from ui.widgets.sku_navigator import SKUNavigator
 from ui.widgets.time_series_chart import TimeSeriesChart
 from ui.widgets.heatmap_widget import HeatmapWidget
+from ui.widgets.sparklines_widget import SparklinesWidget
 from ui.dialogs.clustering_config_dialog import ClusteringConfigDialog
 from ui.dialogs.anomaly_review_dialog import AnomalyReviewDialog
 from utils.worker_threads import WorkerThread, SimpleWorker
@@ -135,10 +136,8 @@ class ExploreTab(QWidget):
         sparklines_layout = QVBoxLayout(sparklines_widget)
         sparklines_layout.setContentsMargins(5, 5, 5, 5)
         
-        self._sparklines_label = QLabel("Select items in navigator to view sparklines")
-        self._sparklines_label.setAlignment(Qt.AlignCenter)
-        self._sparklines_label.setStyleSheet("color: gray;")
-        sparklines_layout.addWidget(self._sparklines_label)
+        self._sparklines = SparklinesWidget()
+        sparklines_layout.addWidget(self._sparklines)
         
         self._viz_tabs.addTab(sparklines_widget, "Sparklines")
         
@@ -254,7 +253,9 @@ class ExploreTab(QWidget):
         self._navigator.sku_selected.connect(self._on_sku_selected)
         self._navigator.sku_double_clicked.connect(self._on_sku_double_clicked)
         self._navigator.bookmark_toggled.connect(self._on_bookmark_toggled)
+        self._navigator.selection_changed.connect(self._on_navigator_selection_changed)
         self._heatmap.cell_clicked.connect(self._on_heatmap_cell_clicked)
+        self._sparklines.sku_selected.connect(self._on_sku_selected)
     
     # ---------- DATA LOADING ----------
     
@@ -262,6 +263,7 @@ class ExploreTab(QWidget):
         # set data processor
         self._processor = processor
         self._refresh_navigator()
+        self._refresh_sparklines()
     
     def _refresh_navigator(self) -> None:
         # refresh navigator with current data
@@ -292,6 +294,36 @@ class ExploreTab(QWidget):
             self._navigator.set_categories(categories)
         
         self._status_label.setText(f"Loaded {len(skus):,} items - run clustering to discover patterns")
+    
+    def _refresh_sparklines(self, skus: Optional[List[str]] = None) -> None:
+        # refresh sparklines with data
+        if self._processor is None:
+            return
+        
+        df = self._processor.processed_data
+        sku_col = self._processor.get_mapped_column("sku")
+        date_col = self._processor.get_mapped_column("date")
+        qty_col = self._processor.get_mapped_column("quantity")
+        
+        if not all([sku_col, date_col, qty_col]):
+            return
+        
+        # use sample if no specific skus provided
+        if skus is None:
+            skus = self._processor.get_sku_sample(n=20, stratified=True)
+        
+        self._sparklines.set_data_from_dataframe(df, sku_col, date_col, qty_col, skus)
+        
+        # apply tier colors if clustering done
+        if self._clustering.sku_clusters:
+            tier_mapping = {sku: c.volume_tier for sku, c in self._clustering.sku_clusters.items()}
+            self._sparklines.set_colors_by_tier(tier_mapping)
+    
+    def _on_navigator_selection_changed(self, selected_skus: List[str]) -> None:
+        # handle navigator selection change - update sparklines
+        if selected_skus:
+            # show selected skus in sparklines
+            self._refresh_sparklines(selected_skus[:50])  # limit to 50
     
     # ---------- CLUSTERING ----------
     
@@ -345,6 +377,10 @@ class ExploreTab(QWidget):
         
         # update heatmap
         self._heatmap.set_cluster_matrix(self._clustering.cluster_summary)
+        
+        # update sparklines with tier colors
+        tier_mapping = {sku: c.volume_tier for sku, c in clusters.items()}
+        self._sparklines.set_colors_by_tier(tier_mapping)
         
         # update summary
         summary = self._clustering.get_cluster_summary()
@@ -500,6 +536,9 @@ class ExploreTab(QWidget):
         # update chart
         self._update_sku_chart(sku)
         
+        # update sparklines selection
+        self._sparklines.select_sku(sku)
+        
         # enable action buttons
         self._bookmark_btn.setEnabled(True)
         self._flag_btn.setEnabled(True)
@@ -614,7 +653,8 @@ class ExploreTab(QWidget):
         
         if skus:
             self._status_label.setText(f"Showing {len(skus):,} items in {row_label} - {col_label}")
-            # could filter navigator here
+            # update sparklines with these skus
+            self._refresh_sparklines(skus[:50])
     
     # ---------- PUBLIC METHODS ----------
     
@@ -626,3 +666,4 @@ class ExploreTab(QWidget):
         # refresh tab data
         if self._processor:
             self._refresh_navigator()
+            self._refresh_sparklines()

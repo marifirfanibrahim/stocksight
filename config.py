@@ -40,7 +40,7 @@ WINDOW_DEFAULT_WIDTH = 1400
 WINDOW_DEFAULT_HEIGHT = 900
 
 # ---------- THEME SETTINGS ----------
-DEFAULT_THEME = "light"  # dark or light
+DEFAULT_THEME = "light" 
 
 # ============================================================================
 #                             DATA PROCESSING
@@ -264,6 +264,30 @@ FORECAST_HORIZONS = {
 }
 
 DEFAULT_HORIZON = "medium"
+
+# ---------- FORECAST FREQUENCIES ----------
+FORECAST_FREQUENCIES = {
+    "daily": {
+        "code": "D",
+        "label": "Daily",
+        "description": "Day-by-day forecasts",
+        "periods_per_year": 365
+    },
+    "weekly": {
+        "code": "W",
+        "label": "Weekly",
+        "description": "Week totals",
+        "periods_per_year": 52
+    },
+    "monthly": {
+        "code": "M",
+        "label": "Monthly",
+        "description": "Month totals",
+        "periods_per_year": 12
+    }
+}
+
+DEFAULT_FREQUENCY = "daily"
 
 # ============================================================================
 #                           ANOMALY DETECTION

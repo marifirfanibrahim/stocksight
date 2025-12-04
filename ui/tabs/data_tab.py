@@ -320,14 +320,18 @@ class DataTab(QWidget):
     # ---------- FILE LOADING ----------
     
     def _browse_file(self) -> None:
-        # open file browser
+        # open file browser starting from app folder
         from utils.file_handlers import FileHandler
+        
         handler = FileHandler()
+        
+        # start from app folder instead of home directory
+        start_dir = str(config.BASE_DIR)
         
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Data File",
-            handler.last_directory,
+            start_dir, # or handler.last_directory
             handler.get_open_filter()
         )
         
