@@ -84,6 +84,7 @@ class DataTab(QWidget):
         self._proceed_btn = QPushButton("Proceed to Pattern Discovery →")
         self._proceed_btn.setEnabled(False)
         self._proceed_btn.setMinimumHeight(40)
+        self._proceed_btn.setStyleSheet(f"background-color: {config.UI_COLORS['primary']}; color: white; font-weight: bold;")
         self._proceed_btn.clicked.connect(self.proceed_requested.emit)
         left_layout.addWidget(self._proceed_btn)
         

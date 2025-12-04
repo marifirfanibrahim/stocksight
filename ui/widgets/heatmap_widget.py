@@ -123,22 +123,40 @@ class HeatmapWidget(QWidget):
         self._data = None
         self._row_labels = []
         self._col_labels = []
+        
+        # remove colorbar if exists
+        self._remove_colorbar()
+        
         self._ax.clear()
-        if self._colorbar is not None:
-            self._colorbar.remove()
-            self._colorbar = None
         self._canvas.draw()
     
     # ---------- DRAWING ----------
     
+    def _remove_colorbar(self) -> None:
+        # safely remove existing colorbar
+        if self._colorbar is not None:
+            try:
+                # remove the colorbar's axes from figure
+                if hasattr(self._colorbar, 'ax') and self._colorbar.ax is not None:
+                    self._colorbar.ax.remove()
+                # for older matplotlib versions
+                elif hasattr(self._colorbar, 'remove'):
+                    try:
+                        self._colorbar.remove()
+                    except:
+                        pass
+            except Exception:
+                pass
+            finally:
+                self._colorbar = None
+    
     def _redraw(self) -> None:
         # redraw heatmap
+        # clear axis
         self._ax.clear()
         
-        # clear existing colorbar
-        if self._colorbar is not None:
-            self._colorbar.remove()
-            self._colorbar = None
+        # remove existing colorbar
+        self._remove_colorbar()
         
         if self._data is None or len(self._data) == 0:
             self._canvas.draw()
@@ -176,8 +194,12 @@ class HeatmapWidget(QWidget):
                 
                 self._ax.text(j, i, text, ha="center", va="center", color=text_color, fontsize=10)
         
-        # add colorbar
-        self._colorbar = self._figure.colorbar(im, ax=self._ax, shrink=0.8)
+        # add new colorbar
+        try:
+            self._colorbar = self._figure.colorbar(im, ax=self._ax, shrink=0.8)
+        except Exception:
+            # if colorbar fails just continue without it
+            pass
         
         self._figure.tight_layout()
         self._canvas.draw()
