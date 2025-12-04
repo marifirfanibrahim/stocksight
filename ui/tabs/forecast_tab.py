@@ -45,6 +45,7 @@ class ForecastTab(QWidget):
         self._processor = None
         self._worker = None
         self._current_sku = None
+        self._current_frequency = "D"
         
         self._setup_ui()
         self._connect_signals()
@@ -244,12 +245,17 @@ class ForecastTab(QWidget):
     def _on_settings_confirmed(self, settings: Dict) -> None:
         # handle settings confirmed
         self._settings = settings
+        self._current_frequency = settings.get("frequency", "D")
         
         strategy = settings.get("strategy", "balanced")
         strategy_info = config.FORECASTING.get(strategy, {})
         
+        # frequency label
+        freq_labels = {"D": "Daily", "W": "Weekly", "M": "Monthly"}
+        freq_label = freq_labels.get(self._current_frequency, "Daily")
+        
         self._strategy_label.setText(
-            f"Strategy: {strategy_info.get('icon', '')} {strategy_info.get('name', strategy)}"
+            f"Strategy: {strategy_info.get('icon', '')} {strategy_info.get('name', strategy)} | {freq_label}"
         )
         self._strategy_label.setStyleSheet("color: #333;")
     
@@ -267,6 +273,7 @@ class ForecastTab(QWidget):
             return
         
         settings = self._settings
+        self._current_frequency = settings.get("frequency", "D")
         
         # show progress
         progress = ProgressDialog("Generating Forecasts", self)
@@ -295,6 +302,7 @@ class ForecastTab(QWidget):
                 sku_col, date_col, qty_col,
                 strategy=settings.get("strategy", "balanced"),
                 horizon=settings.get("horizon", 30),
+                frequency=settings.get("frequency", "D"),
                 tier_mapping=tier_mapping if settings.get("tier_processing", True) else None,
                 features=feature_cols,
                 progress_callback=progress_callback
@@ -352,9 +360,14 @@ class ForecastTab(QWidget):
         fair = status_dist.get("Fair", 0)
         review = status_dist.get("Review", 0)
         
+        # frequency label
+        freq_labels = {"D": "daily", "W": "weekly", "M": "monthly"}
+        freq_label = freq_labels.get(self._current_frequency, "daily")
+        
         summary_text = (
             f"<b>Total Items:</b> {total:,}<br>"
             f"<b>Total Forecast:</b> {total_forecast:,.0f} units<br>"
+            f"<b>Frequency:</b> {freq_label.title()}<br>"
             f"<b>Average Accuracy:</b> {100-avg_mape:.1f}% (MAPE: {avg_mape:.1f}%)<br><br>"
             f"<b>Quality:</b><br>"
             f"✓ Good: {good} | ⚠ Fair: {fair} | ✗ Review: {review}"
@@ -391,9 +404,16 @@ class ForecastTab(QWidget):
         date_col = self._processor.get_mapped_column("date")
         qty_col = self._processor.get_mapped_column("quantity")
         
+        # get frequency from forecast result
+        frequency = getattr(forecast, 'frequency', self._current_frequency)
+        
         if not sku_data.empty:
-            hist_dates = sku_data[date_col].tolist()
-            hist_values = sku_data[qty_col].tolist()
+            # aggregate historical data to match forecast frequency
+            hist_aggregated = self._forecaster.aggregate_to_frequency(
+                sku_data, date_col, qty_col, frequency
+            )
+            hist_dates = hist_aggregated[date_col].tolist()
+            hist_values = hist_aggregated[qty_col].tolist()
             self._chart.set_data(hist_dates, hist_values, label="Historical")
         
         # add forecast
@@ -403,6 +423,9 @@ class ForecastTab(QWidget):
             forecast.lower_bound,
             forecast.upper_bound
         )
+        
+        # update chart frequency for proper axis formatting
+        self._chart.set_frequency(frequency)
     
     def _update_metrics(self, forecast) -> None:
         # update metrics display
@@ -413,13 +436,19 @@ class ForecastTab(QWidget):
         rmse = metrics.get("rmse", 0)
         
         total = sum(forecast.forecast)
-        avg_daily = total / len(forecast.forecast) if forecast.forecast else 0
+        avg_period = total / len(forecast.forecast) if forecast.forecast else 0
+        
+        # frequency label for period description
+        frequency = getattr(forecast, 'frequency', self._current_frequency)
+        period_labels = {"D": "Daily", "W": "Weekly", "M": "Monthly"}
+        period_label = period_labels.get(frequency, "Period")
         
         metrics_text = (
             f"<b>Item:</b> {forecast.sku}<br>"
             f"<b>Model:</b> {forecast.model}<br><br>"
             f"<b>Forecast Total:</b> {total:,.0f} units<br>"
-            f"<b>Daily Average:</b> {avg_daily:,.1f} units<br><br>"
+            f"<b>{period_label} Average:</b> {avg_period:,.1f} units<br>"
+            f"<b>Periods:</b> {len(forecast.forecast)}<br><br>"
             f"<b>MAPE:</b> {mape:.1f}%<br>"
             f"<b>MAE:</b> {mae:.2f}<br>"
             f"<b>RMSE:</b> {rmse:.2f}"

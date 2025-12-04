@@ -256,31 +256,38 @@ class DataTab(QWidget):
         group = QGroupBox("3. Item Classification (ABC Analysis)")
         layout = QVBoxLayout(group)
         
-        # classification bars
+        # classification display
         self._class_frame = QFrame()
         class_layout = QHBoxLayout(self._class_frame)
+        class_layout.setSpacing(20)
         
-        for tier, color, desc in [("A", "#81C784", "High Volume"), 
-                                   ("B", "#FFD54F", "Medium Volume"), 
-                                   ("C", "#E57373", "Low Volume")]:
+        for tier, color, desc in [("A", "#4CAF50", "High Volume"), 
+                                   ("B", "#FF9800", "Medium Volume"), 
+                                   ("C", "#F44336", "Low Volume")]:
             tier_widget = QWidget()
             tier_layout = QVBoxLayout(tier_widget)
             tier_layout.setAlignment(Qt.AlignCenter)
+            tier_layout.setSpacing(4)
             
+            # tier letter - larger font
             tier_label = QLabel(tier)
-            tier_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
+            tier_label.setFont(QFont("Segoe UI", 32, QFont.Bold))
             tier_label.setAlignment(Qt.AlignCenter)
             tier_label.setStyleSheet(f"color: {color};")
             tier_layout.addWidget(tier_label)
             
+            # count and percentage - larger font
             count_label = QLabel("--")
             count_label.setObjectName(f"tier_{tier}_count")
+            count_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
             count_label.setAlignment(Qt.AlignCenter)
             count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             tier_layout.addWidget(count_label)
             
+            # description - larger font
             desc_label = QLabel(desc)
-            desc_label.setStyleSheet("font-size: 10px;")
+            desc_label.setFont(QFont("Segoe UI", 11))
+            desc_label.setStyleSheet("color: #555;")
             desc_label.setAlignment(Qt.AlignCenter)
             tier_layout.addWidget(desc_label)
             
@@ -290,7 +297,7 @@ class DataTab(QWidget):
         
         # explanation
         explain = QLabel("Items are classified using the 80/20 rule based on total volume")
-        explain.setStyleSheet("font-style: italic;")
+        explain.setStyleSheet("font-style: italic; color: #666;")
         layout.addWidget(explain)
         
         return group
@@ -331,7 +338,7 @@ class DataTab(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Data File",
-            start_dir, # or handler.last_directory
+            start_dir,
             handler.get_open_filter()
         )
         

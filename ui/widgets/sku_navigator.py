@@ -109,11 +109,6 @@ class SKUNavigator(QWidget):
         self._select_all_btn = QPushButton("Select All")
         button_layout.addWidget(self._select_all_btn)
         
-        self._select_group_btn = QPushButton("Select Group")
-        self._select_group_btn.setEnabled(False)
-        self._select_group_btn.setToolTip("Select all items in the currently selected group")
-        button_layout.addWidget(self._select_group_btn)
-        
         self._clear_btn = QPushButton("Clear")
         button_layout.addWidget(self._clear_btn)
         
@@ -128,7 +123,6 @@ class SKUNavigator(QWidget):
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
         self._bookmark_btn.clicked.connect(self._toggle_bookmark)
         self._select_all_btn.clicked.connect(self._select_all)
-        self._select_group_btn.clicked.connect(self._select_current_group)
         self._clear_btn.clicked.connect(self._clear_selection)
     
     # ---------- DATA MANAGEMENT ----------
@@ -195,7 +189,6 @@ class SKUNavigator(QWidget):
             self._build_flat_tree(bookmarked)
         
         self._update_count()
-        self._update_select_group_button()
     
     def _build_flat_tree(self, skus: List[str]) -> None:
         # build flat list of skus
@@ -293,7 +286,7 @@ class SKUNavigator(QWidget):
         item.setData(0, Qt.UserRole, {"type": "sku", "sku": sku})
         item.setFlags(item.flags() | Qt.ItemIsSelectable)
         
-        # disable editing but items are still selectable
+        # disable editing
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         
         # mark bookmarked items
@@ -377,12 +370,6 @@ class SKUNavigator(QWidget):
         
         self._count_label.setText(f"{count:,} items")
     
-    def _update_select_group_button(self) -> None:
-        # enable select group button when in grouped view
-        view = self._view_combo.currentText()
-        is_grouped = view in ["By Category", "By Volume Tier", "By Pattern", "By Cluster"]
-        self._select_group_btn.setEnabled(is_grouped)
-    
     # ---------- EVENT HANDLERS ----------
     
     def _on_search(self, text: str) -> None:
@@ -440,11 +427,6 @@ class SKUNavigator(QWidget):
             menu.addAction(bookmark_action)
             
         elif data and data.get("type") == "group":
-            # select all in group
-            select_action = QAction("Select All in Group", menu)
-            select_action.triggered.connect(lambda: self._select_group_items(item))
-            menu.addAction(select_action)
-            
             # copy group name
             copy_action = QAction("Copy Group Name", menu)
             copy_action.triggered.connect(lambda: self._copy_to_clipboard(data.get("name", "")))
@@ -485,43 +467,6 @@ class SKUNavigator(QWidget):
     def _select_all(self) -> None:
         # select all visible items
         self._tree.selectAll()
-    
-    def _select_current_group(self) -> None:
-        # select all items in currently selected group
-        selected_items = self._tree.selectedItems()
-        
-        for item in selected_items:
-            data = item.data(0, Qt.UserRole)
-            
-            # if a group is selected select all its children
-            if data and data.get("type") == "group":
-                self._select_group_items(item)
-                return
-            
-            # if an item is selected find its parent group
-            parent = item.parent()
-            if parent:
-                self._select_group_items(parent)
-                return
-        
-        # if nothing specific selected select first group
-        if self._tree.topLevelItemCount() > 0:
-            first_group = self._tree.topLevelItem(0)
-            data = first_group.data(0, Qt.UserRole)
-            if data and data.get("type") == "group":
-                self._select_group_items(first_group)
-    
-    def _select_group_items(self, group_item: QTreeWidgetItem) -> None:
-        # select all items in a group
-        self._tree.clearSelection()
-        
-        for i in range(group_item.childCount()):
-            child = group_item.child(i)
-            child.setSelected(True)
-        
-        # also select the group itself
-        group_item.setSelected(True)
-        group_item.setExpanded(True)
     
     def _clear_selection(self) -> None:
         # clear selection

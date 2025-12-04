@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QSpinBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QPainterPath
+from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QPainterPath, QBrush
 from typing import Dict, List, Optional, Any
 import pandas as pd
 import numpy as np
@@ -33,7 +33,7 @@ class SparklineItem(QWidget):
         super().__init__(parent)
         
         self._sku = sku
-        self._values = values
+        self._values = values if values else []
         self._selected = False
         self._hover = False
         
@@ -62,16 +62,18 @@ class SparklineItem(QWidget):
         layout.addWidget(self._canvas, stretch=1)
         
         # stats
-        if self._values:
+        if self._values and len(self._values) > 0:
             mean_val = np.mean(self._values)
-            stats_text = f"{mean_val:,.0f}"
+            min_val = np.min(self._values)
+            max_val = np.max(self._values)
+            stats_text = f"μ:{mean_val:,.0f}"
         else:
             stats_text = "--"
         
         self._stats_label = QLabel(stats_text)
-        self._stats_label.setFixedWidth(60)
+        self._stats_label.setFixedWidth(70)
         self._stats_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self._stats_label.setStyleSheet("color: #666;")
+        self._stats_label.setStyleSheet("color: #666; font-size: 9pt;")
         layout.addWidget(self._stats_label)
     
     def set_selected(self, selected: bool) -> None:
@@ -106,6 +108,10 @@ class SparklineItem(QWidget):
     def get_sku(self) -> str:
         # get sku
         return self._sku
+    
+    def set_color(self, color: str) -> None:
+        # set sparkline color
+        self._canvas.set_color(color)
 
 
 # ============================================================================
@@ -119,7 +125,7 @@ class SparklineCanvas(QWidget):
         # initialize canvas
         super().__init__(parent)
         
-        self._values = values
+        self._values = values if values else []
         self._color = QColor(config.UI_COLORS["primary"])
         self._fill_color = QColor(config.UI_COLORS["primary"])
         self._fill_color.setAlpha(50)
@@ -129,7 +135,7 @@ class SparklineCanvas(QWidget):
     
     def set_values(self, values: List[float]) -> None:
         # set values and redraw
-        self._values = values
+        self._values = values if values else []
         self.update()
     
     def set_color(self, color: str) -> None:
@@ -141,54 +147,69 @@ class SparklineCanvas(QWidget):
     
     def paintEvent(self, event) -> None:
         # paint sparkline
-        if not self._values or len(self._values) < 2:
-            return
-        
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
         # get dimensions
         width = self.width()
         height = self.height()
-        padding = 2
+        padding = 3
+        
+        # check for valid data
+        if not self._values or len(self._values) < 2:
+            # draw placeholder line
+            painter.setPen(QPen(QColor("#ddd"), 1))
+            y_mid = height // 2
+            painter.drawLine(padding, y_mid, width - padding, y_mid)
+            return
         
         # calculate scaling
         min_val = min(self._values)
         max_val = max(self._values)
-        val_range = max_val - min_val if max_val != min_val else 1
+        val_range = max_val - min_val
+        
+        # handle constant values
+        if val_range == 0:
+            val_range = max(abs(max_val), 1)
+            min_val = max_val - val_range / 2
         
         # calculate points
         points = []
+        draw_width = width - 2 * padding
+        draw_height = height - 2 * padding
+        
         for i, val in enumerate(self._values):
-            x = padding + (i / (len(self._values) - 1)) * (width - 2 * padding)
-            y = height - padding - ((val - min_val) / val_range) * (height - 2 * padding)
+            x = padding + (i / (len(self._values) - 1)) * draw_width
+            y = height - padding - ((val - min_val) / val_range) * draw_height
+            # clamp y to valid range
+            y = max(padding, min(height - padding, y))
             points.append((x, y))
         
         # draw filled area
-        path = QPainterPath()
-        path.moveTo(points[0][0], height - padding)
-        for x, y in points:
-            path.lineTo(x, y)
-        path.lineTo(points[-1][0], height - padding)
-        path.closeSubpath()
-        
-        painter.fillPath(path, self._fill_color)
-        
-        # draw line
-        pen = QPen(self._color)
-        pen.setWidth(2)
-        painter.setPen(pen)
-        
-        for i in range(len(points) - 1):
-            painter.drawLine(
-                int(points[i][0]), int(points[i][1]),
-                int(points[i+1][0]), int(points[i+1][1])
-            )
-        
-        # draw end point
-        if points:
+        if len(points) >= 2:
+            path = QPainterPath()
+            path.moveTo(points[0][0], height - padding)
+            for x, y in points:
+                path.lineTo(x, y)
+            path.lineTo(points[-1][0], height - padding)
+            path.closeSubpath()
+            
+            painter.fillPath(path, self._fill_color)
+            
+            # draw line
+            pen = QPen(self._color)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            
+            for i in range(len(points) - 1):
+                painter.drawLine(
+                    int(points[i][0]), int(points[i][1]),
+                    int(points[i+1][0]), int(points[i+1][1])
+                )
+            
+            # draw end point
             last_x, last_y = points[-1]
-            painter.setBrush(self._color)
+            painter.setBrush(QBrush(self._color))
             painter.drawEllipse(int(last_x) - 3, int(last_y) - 3, 6, 6)
 
 
@@ -210,6 +231,7 @@ class SparklinesWidget(QWidget):
         self._sparklines = {}
         self._selected_sku = None
         self._data = {}
+        self._tier_colors = {}
         
         self._setup_ui()
     
@@ -273,7 +295,24 @@ class SparklinesWidget(QWidget):
     
     def set_data(self, data: Dict[str, List[float]]) -> None:
         # set sparkline data
-        self._data = data
+        self._data = {}
+        
+        # validate and clean data
+        for sku, values in data.items():
+            if values and len(values) > 0:
+                # convert to float and filter out nan/inf
+                clean_values = []
+                for v in values:
+                    try:
+                        fv = float(v)
+                        if np.isfinite(fv):
+                            clean_values.append(fv)
+                    except (ValueError, TypeError):
+                        continue
+                
+                if clean_values:
+                    self._data[sku] = clean_values
+        
         self._refresh_display()
     
     def set_data_from_dataframe(self, 
@@ -285,17 +324,34 @@ class SparklinesWidget(QWidget):
         # set data from dataframe
         data = {}
         
+        # ensure date column is datetime
+        df = df.copy()
+        df[date_col] = pd.to_datetime(df[date_col])
+        
         # filter skus if provided
         if skus:
             df = df[df[sku_col].isin(skus)]
         
-        # group by sku and get values
+        # group by sku and get values sorted by date
         for sku, group in df.groupby(sku_col):
             sorted_group = group.sort_values(date_col)
             values = sorted_group[value_col].tolist()
-            data[sku] = values
+            
+            # clean values
+            clean_values = []
+            for v in values:
+                try:
+                    fv = float(v)
+                    if np.isfinite(fv):
+                        clean_values.append(fv)
+                except (ValueError, TypeError):
+                    continue
+            
+            if clean_values:
+                data[sku] = clean_values
         
-        self.set_data(data)
+        self._data = data
+        self._refresh_display()
     
     def clear(self) -> None:
         # clear all sparklines
@@ -338,6 +394,10 @@ class SparklinesWidget(QWidget):
             item = SparklineItem(sku, values)
             item.clicked.connect(self._on_sparkline_clicked)
             
+            # apply tier color if set
+            if sku in self._tier_colors:
+                item.set_color(self._tier_colors[sku])
+            
             # insert before stretch
             self._container_layout.insertWidget(self._container_layout.count() - 1, item)
             self._sparklines[sku] = item
@@ -354,19 +414,19 @@ class SparklinesWidget(QWidget):
             return sorted(self._data.keys())
         
         elif sort_option == "By Volume (High)":
-            return sorted(self._data.keys(), key=lambda s: sum(self._data[s]), reverse=True)
+            return sorted(self._data.keys(), key=lambda s: sum(self._data[s]) if self._data[s] else 0, reverse=True)
         
         elif sort_option == "By Volume (Low)":
-            return sorted(self._data.keys(), key=lambda s: sum(self._data[s]))
+            return sorted(self._data.keys(), key=lambda s: sum(self._data[s]) if self._data[s] else 0)
         
         elif sort_option == "By Trend":
-            # sort by trend direction
             def get_trend(sku):
-                values = self._data[sku]
-                if len(values) < 2:
+                values = self._data.get(sku, [])
+                if not values or len(values) < 2:
                     return 0
-                first_half = np.mean(values[:len(values)//2])
-                second_half = np.mean(values[len(values)//2:])
+                mid = len(values) // 2
+                first_half = np.mean(values[:mid]) if mid > 0 else 0
+                second_half = np.mean(values[mid:]) if mid < len(values) else 0
                 return second_half - first_half
             
             return sorted(self._data.keys(), key=get_trend, reverse=True)
@@ -407,17 +467,24 @@ class SparklinesWidget(QWidget):
     
     def set_sparkline_color(self, sku: str, color: str) -> None:
         # set color for specific sparkline
+        self._tier_colors[sku] = color
         if sku in self._sparklines:
-            self._sparklines[sku]._canvas.set_color(color)
+            self._sparklines[sku].set_color(color)
     
     def set_colors_by_tier(self, tier_mapping: Dict[str, str]) -> None:
         # set colors based on tier
         tier_colors = {
-            "A": "#81C784",  # green
-            "B": "#FFD54F",  # yellow
-            "C": "#E57373"   # red
+            "A": "#4CAF50",  # green
+            "B": "#FF9800",  # orange
+            "C": "#F44336"   # red
         }
         
+        self._tier_colors = {}
         for sku, tier in tier_mapping.items():
             color = tier_colors.get(tier, config.UI_COLORS["primary"])
-            self.set_sparkline_color(sku, color)
+            self._tier_colors[sku] = color
+        
+        # update existing sparklines
+        for sku, item in self._sparklines.items():
+            if sku in self._tier_colors:
+                item.set_color(self._tier_colors[sku])

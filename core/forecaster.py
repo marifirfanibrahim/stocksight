@@ -29,7 +29,7 @@ class ForecastResult:
     lower_bound: List[float]
     upper_bound: List[float]
     metrics: Dict[str, float]
-    frequency: str = "D"  # D=daily, W=weekly, M=monthly
+    frequency: str = "D"
 
 
 # ============================================================================
@@ -72,7 +72,7 @@ class Forecaster:
         result = result.set_index(date_col)
         
         if frequency == "D":
-            # daily - no aggregation needed, just resample to fill gaps
+            # daily - resample to fill gaps
             aggregated = result[qty_col].resample("D").sum()
         elif frequency == "W":
             # weekly aggregation
@@ -133,8 +133,7 @@ class Forecaster:
                 result = self._run_model(ts, model_name, horizon_periods, frequency, features, df)
                 if result is not None:
                     model_results[model_name] = result
-            except Exception as e:
-                # skip failed models
+            except Exception:
                 continue
         
         # select best model based on metrics
@@ -218,8 +217,9 @@ class Forecaster:
         lower = [max(0, last_value - 1.96 * std)] * horizon
         upper = [last_value + 1.96 * std] * horizon
         
-        # calculate metrics using holdout
-        metrics = self._calculate_metrics(ts, forecast[:min(len(ts), horizon)])
+        # in-sample metrics
+        fitted_values = [ts.mean()] * len(ts)
+        metrics = self._calculate_metrics(ts.values, fitted_values)
         
         return {
             "forecast": forecast,
@@ -235,11 +235,11 @@ class Forecaster:
         
         # determine season length based on frequency
         if frequency == "D":
-            season_length = 7  # weekly seasonality
+            season_length = 7
         elif frequency == "W":
-            season_length = 52  # yearly seasonality
+            season_length = 52
         elif frequency == "M":
-            season_length = 12  # yearly seasonality
+            season_length = 12
         else:
             season_length = 7
         
@@ -253,7 +253,6 @@ class Forecaster:
         # get seasonal values
         forecast = []
         for i in range(horizon):
-            # get value from same position in last season
             idx = -(season_length - (i % season_length))
             if abs(idx) <= len(ts):
                 forecast.append(float(ts.iloc[idx]))
@@ -265,8 +264,15 @@ class Forecaster:
         lower = [max(0, f - 1.96 * std) for f in forecast]
         upper = [f + 1.96 * std for f in forecast]
         
-        # calculate metrics
-        metrics = self._calculate_metrics(ts, forecast[:min(len(ts), horizon)])
+        # in-sample metrics using seasonal fitted values
+        fitted_values = []
+        for i in range(len(ts)):
+            if i >= season_length:
+                fitted_values.append(ts.iloc[i - season_length])
+            else:
+                fitted_values.append(ts.mean())
+        
+        metrics = self._calculate_metrics(ts.values, fitted_values)
         
         return {
             "forecast": forecast,
@@ -295,7 +301,7 @@ class Forecaster:
                 seasonal_periods = 7
                 min_obs = 14
             
-            # fit model
+            # fit model on all data
             use_seasonal = len(ts) >= min_obs
             model = ExponentialSmoothing(
                 ts,
@@ -316,14 +322,14 @@ class Forecaster:
             
             forecast = [max(0, float(v)) for v in forecast_result.values]
             
-            # confidence interval
+            # confidence interval from residuals
             residuals = ts - fitted.fittedvalues
             std = residuals.std()
             lower = [max(0, f - 1.96 * std) for f in forecast]
             upper = [f + 1.96 * std for f in forecast]
             
-            # calculate metrics
-            metrics = self._calculate_metrics(ts, fitted.fittedvalues)
+            # in-sample metrics
+            metrics = self._calculate_metrics(ts.values, fitted.fittedvalues.values)
             
             return {
                 "forecast": forecast,
@@ -338,11 +344,11 @@ class Forecaster:
     # ---------- BALANCED MODELS ----------
     
     def _arima_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
-        # arima model with automatic order selection
+        # arima model fitted on all data
         try:
             from statsmodels.tsa.arima.model import ARIMA
             
-            # simple arima with default orders
+            # fit model on all data
             model = ARIMA(ts, order=(1, 1, 1))
             fitted = model.fit()
             
@@ -360,8 +366,8 @@ class Forecaster:
             lower = [max(0, float(v)) for v in conf_int.iloc[:, 0].values]
             upper = [float(v) for v in conf_int.iloc[:, 1].values]
             
-            # calculate metrics
-            metrics = self._calculate_metrics(ts, fitted.fittedvalues)
+            # in-sample metrics
+            metrics = self._calculate_metrics(ts.values, fitted.fittedvalues.values)
             
             return {
                 "forecast": forecast,
@@ -378,9 +384,11 @@ class Forecaster:
         try:
             from statsmodels.tsa.forecasting.theta import ThetaModel
             
+            # fit model on all data
             model = ThetaModel(ts)
             fitted = model.fit()
             
+            # generate forecast
             forecast_result = fitted.forecast(horizon)
             last_date = ts.index[-1]
             forecast_dates = pd.date_range(
@@ -396,9 +404,9 @@ class Forecaster:
             lower = [max(0, f - 1.96 * std) for f in forecast]
             upper = [f + 1.96 * std for f in forecast]
             
-            # calculate metrics
-            in_sample = fitted.forecast(len(ts))
-            metrics = self._calculate_metrics(ts, in_sample)
+            # in-sample fitted values
+            in_sample_forecast = fitted.forecast(len(ts))
+            metrics = self._calculate_metrics(ts.values, in_sample_forecast.values)
             
             return {
                 "forecast": forecast,
@@ -421,7 +429,7 @@ class Forecaster:
                 "y": ts.values
             })
             
-            # fit model with frequency-appropriate settings
+            # fit model on all data
             model = Prophet(
                 yearly_seasonality=True,
                 weekly_seasonality=(frequency == "D"),
@@ -429,20 +437,20 @@ class Forecaster:
             )
             model.fit(df_prophet)
             
-            # generate future dates
+            # generate future dates for forecast only
             future = model.make_future_dataframe(periods=horizon, freq=frequency)
             forecast_result = model.predict(future)
             
-            # extract forecast
+            # extract forecast portion only
             forecast_df = forecast_result.tail(horizon)
             forecast = [max(0, float(v)) for v in forecast_df["yhat"].values]
             lower = [max(0, float(v)) for v in forecast_df["yhat_lower"].values]
             upper = [float(v) for v in forecast_df["yhat_upper"].values]
             dates = [d.strftime("%Y-%m-%d") for d in forecast_df["ds"]]
             
-            # calculate metrics from in-sample
+            # in-sample metrics from fitted portion
             in_sample = forecast_result.head(len(ts))["yhat"].values
-            metrics = self._calculate_metrics(ts, in_sample)
+            metrics = self._calculate_metrics(ts.values, in_sample)
             
             return {
                 "forecast": forecast,
@@ -462,39 +470,50 @@ class Forecaster:
                            frequency: str = "D",
                            features: Optional[List[str]] = None,
                            full_df: Optional[pd.DataFrame] = None) -> Dict:
-        # lightgbm model with features
+        # lightgbm model fitted on all data
         try:
             import lightgbm as lgb
             
-            # prepare features
+            # prepare features from all data
             if full_df is None or features is None:
-                # create basic features
-                df = self._create_basic_features(ts)
+                df = self._create_ml_features(ts)
                 feature_cols = [c for c in df.columns if c != "target"]
             else:
                 df = full_df.copy()
-                feature_cols = features
+                feature_cols = [f for f in features if f in df.columns]
+                if "target" not in df.columns:
+                    df["target"] = ts.values[-len(df):]
             
-            # split train test
-            train_size = int(len(df) * 0.8)
-            train = df.iloc[:train_size]
+            # remove rows with nan
+            df = df.dropna()
             
-            X_train = train[feature_cols].fillna(0)
-            y_train = train["target"] if "target" in train.columns else ts.iloc[:train_size]
+            if len(df) < 10:
+                return self._exponential_smoothing_forecast(ts, horizon, frequency)
             
-            # train model
-            model = lgb.LGBMRegressor(n_estimators=100, random_state=42, verbosity=-1)
-            model.fit(X_train, y_train)
+            # fit on all data
+            X = df[feature_cols]
+            y = df["target"]
             
-            # generate forecast
+            model = lgb.LGBMRegressor(
+                n_estimators=100, 
+                random_state=42, 
+                verbosity=-1,
+                force_col_wise=True
+            )
+            model.fit(X, y)
+            
+            # in-sample predictions for metrics
+            in_sample_pred = model.predict(X)
+            metrics = self._calculate_metrics(y.values, in_sample_pred)
+            
+            # generate forecast iteratively
             forecast = []
             last_features = df[feature_cols].iloc[-1:].copy()
             
             for i in range(horizon):
-                pred = model.predict(last_features.fillna(0))[0]
+                pred = model.predict(last_features)[0]
                 forecast.append(max(0, float(pred)))
-                # update features for next step
-                last_features = self._update_features(last_features, pred)
+                last_features = self._update_ml_features(last_features, pred, i)
             
             # dates
             last_date = ts.index[-1]
@@ -504,14 +523,11 @@ class Forecaster:
                 freq=frequency
             )
             
-            # confidence interval
-            std = ts.std()
+            # confidence interval from residuals
+            residuals = y.values - in_sample_pred
+            std = np.std(residuals)
             lower = [max(0, f - 1.96 * std) for f in forecast]
             upper = [f + 1.96 * std for f in forecast]
-            
-            # calculate metrics
-            in_sample_pred = model.predict(df[feature_cols].fillna(0))
-            metrics = self._calculate_metrics(ts, in_sample_pred)
             
             return {
                 "forecast": forecast,
@@ -529,37 +545,49 @@ class Forecaster:
                           frequency: str = "D",
                           features: Optional[List[str]] = None,
                           full_df: Optional[pd.DataFrame] = None) -> Dict:
-        # xgboost model with features
+        # xgboost model fitted on all data
         try:
             import xgboost as xgb
             
-            # prepare features
+            # prepare features from all data
             if full_df is None or features is None:
-                df = self._create_basic_features(ts)
+                df = self._create_ml_features(ts)
                 feature_cols = [c for c in df.columns if c != "target"]
             else:
                 df = full_df.copy()
-                feature_cols = features
+                feature_cols = [f for f in features if f in df.columns]
+                if "target" not in df.columns:
+                    df["target"] = ts.values[-len(df):]
             
-            # split train
-            train_size = int(len(df) * 0.8)
-            train = df.iloc[:train_size]
+            # remove rows with nan
+            df = df.dropna()
             
-            X_train = train[feature_cols].fillna(0)
-            y_train = train["target"] if "target" in train.columns else ts.iloc[:train_size]
+            if len(df) < 10:
+                return self._exponential_smoothing_forecast(ts, horizon, frequency)
             
-            # train model
-            model = xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
-            model.fit(X_train, y_train)
+            # fit on all data
+            X = df[feature_cols]
+            y = df["target"]
             
-            # generate forecast
+            model = xgb.XGBRegressor(
+                n_estimators=100, 
+                random_state=42, 
+                verbosity=0
+            )
+            model.fit(X, y)
+            
+            # in-sample predictions for metrics
+            in_sample_pred = model.predict(X)
+            metrics = self._calculate_metrics(y.values, in_sample_pred)
+            
+            # generate forecast iteratively
             forecast = []
             last_features = df[feature_cols].iloc[-1:].copy()
             
             for i in range(horizon):
-                pred = model.predict(last_features.fillna(0))[0]
+                pred = model.predict(last_features)[0]
                 forecast.append(max(0, float(pred)))
-                last_features = self._update_features(last_features, pred)
+                last_features = self._update_ml_features(last_features, pred, i)
             
             # dates
             last_date = ts.index[-1]
@@ -569,14 +597,11 @@ class Forecaster:
                 freq=frequency
             )
             
-            # confidence interval
-            std = ts.std()
+            # confidence interval from residuals
+            residuals = y.values - in_sample_pred
+            std = np.std(residuals)
             lower = [max(0, f - 1.96 * std) for f in forecast]
             upper = [f + 1.96 * std for f in forecast]
-            
-            # calculate metrics
-            in_sample_pred = model.predict(df[feature_cols].fillna(0))
-            metrics = self._calculate_metrics(ts, in_sample_pred)
             
             return {
                 "forecast": forecast,
@@ -598,6 +623,8 @@ class Forecaster:
         models_to_combine = ["exponential_smoothing", "arima", "theta"]
         
         all_forecasts = []
+        all_lowers = []
+        all_uppers = []
         all_metrics = []
         
         for model_name in models_to_combine:
@@ -605,6 +632,8 @@ class Forecaster:
                 result = self._run_model(ts, model_name, horizon, frequency, features, full_df)
                 if result is not None:
                     all_forecasts.append(result["forecast"])
+                    all_lowers.append(result["lower"])
+                    all_uppers.append(result["upper"])
                     all_metrics.append(result["metrics"])
             except Exception:
                 continue
@@ -614,6 +643,8 @@ class Forecaster:
         
         # combine forecasts using simple average
         ensemble_forecast = np.mean(all_forecasts, axis=0).tolist()
+        ensemble_lower = np.mean(all_lowers, axis=0).tolist()
+        ensemble_upper = np.mean(all_uppers, axis=0).tolist()
         
         # dates
         last_date = ts.index[-1]
@@ -623,74 +654,96 @@ class Forecaster:
             freq=frequency
         )
         
-        # confidence interval
-        std = np.std(all_forecasts, axis=0)
-        ensemble_std = ts.std()
-        lower = [max(0, f - 1.96 * ensemble_std) for f in ensemble_forecast]
-        upper = [f + 1.96 * ensemble_std for f in ensemble_forecast]
-        
         # average metrics
         avg_mape = np.mean([m.get("mape", 0) for m in all_metrics])
         avg_mae = np.mean([m.get("mae", 0) for m in all_metrics])
+        avg_rmse = np.mean([m.get("rmse", 0) for m in all_metrics])
         
         return {
             "forecast": ensemble_forecast,
             "dates": [d.strftime("%Y-%m-%d") for d in forecast_dates],
-            "lower": lower,
-            "upper": upper,
-            "metrics": {"mape": avg_mape, "mae": avg_mae, "models_combined": len(all_forecasts)}
+            "lower": ensemble_lower,
+            "upper": ensemble_upper,
+            "metrics": {
+                "mape": avg_mape, 
+                "mae": avg_mae, 
+                "rmse": avg_rmse,
+                "models_combined": len(all_forecasts)
+            }
         }
     
     # ---------- HELPER METHODS ----------
     
-    def _create_basic_features(self, ts: pd.Series) -> pd.DataFrame:
-        # create basic features for ml models
+    def _create_ml_features(self, ts: pd.Series) -> pd.DataFrame:
+        # create features for ml models from time series
         df = pd.DataFrame({"target": ts.values}, index=ts.index)
         
         # lag features
         df["lag_1"] = df["target"].shift(1)
         df["lag_7"] = df["target"].shift(7)
+        df["lag_14"] = df["target"].shift(14)
+        df["lag_28"] = df["target"].shift(28)
         
         # rolling features
-        df["rolling_mean_7"] = df["target"].rolling(7).mean()
-        df["rolling_std_7"] = df["target"].rolling(7).std()
+        df["rolling_mean_7"] = df["target"].shift(1).rolling(7).mean()
+        df["rolling_std_7"] = df["target"].shift(1).rolling(7).std()
+        df["rolling_mean_28"] = df["target"].shift(1).rolling(28).mean()
         
         # date features
         df["day_of_week"] = df.index.dayofweek
         df["month"] = df.index.month
+        df["day_of_month"] = df.index.day
+        df["week_of_year"] = df.index.isocalendar().week.astype(int)
         
-        return df.dropna()
+        # trend feature
+        df["time_idx"] = np.arange(len(df))
+        
+        return df
     
-    def _update_features(self, features: pd.DataFrame, new_value: float) -> pd.DataFrame:
+    def _update_ml_features(self, features: pd.DataFrame, new_value: float, step: int) -> pd.DataFrame:
         # update features for next forecast step
         updated = features.copy()
         
+        # update lag features
         if "lag_1" in updated.columns:
             updated["lag_1"] = new_value
         
+        # update time index
+        if "time_idx" in updated.columns:
+            updated["time_idx"] = updated["time_idx"].values[0] + step + 1
+        
+        # update date features for next period
+        if "day_of_week" in updated.columns:
+            updated["day_of_week"] = (updated["day_of_week"].values[0] + 1) % 7
+        
+        if "day_of_month" in updated.columns:
+            updated["day_of_month"] = min(28, updated["day_of_month"].values[0] + 1)
+        
         return updated
     
-    def _calculate_metrics(self, actual: pd.Series, predicted: Any) -> Dict[str, float]:
-        # calculate forecast accuracy metrics
-        if isinstance(predicted, pd.Series):
-            predicted = predicted.values
+    def _calculate_metrics(self, actual: np.ndarray, predicted: np.ndarray) -> Dict[str, float]:
+        # calculate forecast accuracy metrics from in-sample fit
+        actual = np.array(actual).flatten()
+        predicted = np.array(predicted).flatten()
         
-        actual_vals = actual.values[-len(predicted):]
-        predicted_vals = np.array(predicted)[:len(actual_vals)]
-        
-        if len(actual_vals) == 0 or len(predicted_vals) == 0:
+        # align lengths
+        min_len = min(len(actual), len(predicted))
+        if min_len == 0:
             return {"mape": 0, "mae": 0, "rmse": 0}
         
+        actual = actual[-min_len:]
+        predicted = predicted[-min_len:]
+        
         # mae
-        mae = np.mean(np.abs(actual_vals - predicted_vals))
+        mae = np.mean(np.abs(actual - predicted))
         
         # rmse
-        rmse = np.sqrt(np.mean((actual_vals - predicted_vals) ** 2))
+        rmse = np.sqrt(np.mean((actual - predicted) ** 2))
         
-        # mape avoiding division by zero
-        mask = actual_vals != 0
+        # mape - avoid division by zero
+        mask = actual != 0
         if mask.sum() > 0:
-            mape = np.mean(np.abs((actual_vals[mask] - predicted_vals[mask]) / actual_vals[mask])) * 100
+            mape = np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100
         else:
             mape = 0
         
