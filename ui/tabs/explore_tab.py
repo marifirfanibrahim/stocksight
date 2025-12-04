@@ -148,6 +148,7 @@ class ExploreTab(QWidget):
         
         # right pane - details
         right_pane = QWidget()
+        right_pane.setMinimumWidth(280)
         right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -158,10 +159,12 @@ class ExploreTab(QWidget):
         # details content
         self._details_frame = QFrame()
         self._details_frame.setFrameStyle(QFrame.StyledPanel)
+        self._details_frame.setMinimumWidth(260)
         details_content = QVBoxLayout(self._details_frame)
         
         self._sku_label = QLabel("Select an item to view details")
         self._sku_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self._sku_label.setWordWrap(True)
         details_content.addWidget(self._sku_label)
         
         self._details_text = QLabel("")
@@ -180,6 +183,7 @@ class ExploreTab(QWidget):
         
         self._flag_btn = QPushButton("⚠ Flag for Correction")
         self._flag_btn.setEnabled(False)
+        self._flag_btn.setMinimumWidth(180)
         self._flag_btn.clicked.connect(self._flag_for_correction)
         details_content.addWidget(self._flag_btn)
         
@@ -193,8 +197,8 @@ class ExploreTab(QWidget):
         
         main_splitter.addWidget(right_pane)
         
-        # set splitter sizes
-        main_splitter.setSizes([250, 500, 250])
+        # set splitter sizes - wider right pane
+        main_splitter.setSizes([220, 480, 300])
         
         layout.addWidget(main_splitter)
         

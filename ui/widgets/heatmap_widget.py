@@ -33,7 +33,6 @@ class HeatmapWidget(QWidget):
         self._data = None
         self._row_labels = []
         self._col_labels = []
-        self._colorbar = None
         self._setup_ui()
     
     # ---------- UI SETUP ----------
@@ -63,7 +62,6 @@ class HeatmapWidget(QWidget):
         # matplotlib figure
         self._figure = Figure(figsize=(8, 5), dpi=100)
         self._canvas = FigureCanvas(self._figure)
-        self._ax = self._figure.add_subplot(111)
         
         # connect click event
         self._canvas.mpl_connect("button_press_event", self._on_click)
@@ -123,44 +121,21 @@ class HeatmapWidget(QWidget):
         self._data = None
         self._row_labels = []
         self._col_labels = []
-        
-        # remove colorbar if exists
-        self._remove_colorbar()
-        
-        self._ax.clear()
+        self._figure.clear()
         self._canvas.draw()
     
     # ---------- DRAWING ----------
     
-    def _remove_colorbar(self) -> None:
-        # safely remove existing colorbar
-        if self._colorbar is not None:
-            try:
-                # remove the colorbar's axes from figure
-                if hasattr(self._colorbar, 'ax') and self._colorbar.ax is not None:
-                    self._colorbar.ax.remove()
-                # for older matplotlib versions
-                elif hasattr(self._colorbar, 'remove'):
-                    try:
-                        self._colorbar.remove()
-                    except:
-                        pass
-            except Exception:
-                pass
-            finally:
-                self._colorbar = None
-    
     def _redraw(self) -> None:
-        # redraw heatmap
-        # clear axis
-        self._ax.clear()
-        
-        # remove existing colorbar
-        self._remove_colorbar()
+        # redraw heatmap - clear entire figure and recreate
+        self._figure.clear()
         
         if self._data is None or len(self._data) == 0:
             self._canvas.draw()
             return
+        
+        # create new axes
+        self._ax = self._figure.add_subplot(111)
         
         # get colormap
         cmap = self._color_scheme.currentText()
@@ -194,13 +169,10 @@ class HeatmapWidget(QWidget):
                 
                 self._ax.text(j, i, text, ha="center", va="center", color=text_color, fontsize=10)
         
-        # add new colorbar
-        try:
-            self._colorbar = self._figure.colorbar(im, ax=self._ax, shrink=0.8)
-        except Exception:
-            # if colorbar fails just continue without it
-            pass
+        # add colorbar
+        self._figure.colorbar(im, ax=self._ax, shrink=0.8)
         
+        # tight layout
         self._figure.tight_layout()
         self._canvas.draw()
         
@@ -227,7 +199,7 @@ class HeatmapWidget(QWidget):
     
     def _on_click(self, event) -> None:
         # handle click on heatmap cell
-        if event.inaxes != self._ax:
+        if not hasattr(self, '_ax') or event.inaxes != self._ax:
             return
         
         if self._data is None:

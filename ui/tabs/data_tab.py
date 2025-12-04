@@ -495,25 +495,34 @@ class DataTab(QWidget):
         # apply recommended data fixes
         fixes_applied = []
         
-        # check for missing values
+        # get current quality issues
         quality = self._processor.data_quality
+        issues = quality.get("issues", [])
         
-        for rec in quality.get("recommendations", []):
-            if "missing" in rec.lower():
-                success, msg = self._processor.apply_fix("fill_missing")
+        # apply fixes based on issues found
+        for issue in issues:
+            issue_lower = issue.lower()
+            
+            # check for missing values
+            if "missing" in issue_lower:
+                success, msg = self._processor.apply_fix("fill_missing", method="ffill")
                 if success:
-                    fixes_applied.append(msg)
-            elif "duplicate" in rec.lower():
+                    fixes_applied.append("Filled missing values")
+            
+            # check for duplicates
+            elif "duplicate" in issue_lower:
                 success, msg = self._processor.apply_fix("remove_duplicates")
                 if success:
-                    fixes_applied.append(msg)
-            elif "negative" in rec.lower():
-                success, msg = self._processor.apply_fix("fix_negatives")
+                    fixes_applied.append("Removed duplicate entries")
+            
+            # check for negative values
+            elif "negative" in issue_lower:
+                success, msg = self._processor.apply_fix("fix_negatives", method="zero")
                 if success:
-                    fixes_applied.append(msg)
+                    fixes_applied.append("Fixed negative values")
         
         if fixes_applied:
-            # recalculate quality
+            # recalculate quality after fixes
             self._calculate_quality()
             
             # update preview
@@ -523,14 +532,21 @@ class DataTab(QWidget):
             self._session.set_data(self._processor.processed_data)
             self._session.update_state(data_cleaned=True)
             
+            # show what was fixed
             QMessageBox.information(
                 self, 
                 "Fixes Applied", 
-                "Applied fixes:\n" + "\n".join([f"• {f}" for f in fixes_applied])
+                "Applied the following fixes:\n" + "\n".join([f"• {f}" for f in fixes_applied])
             )
             
             # enable proceed
             self._proceed_btn.setEnabled(True)
+        else:
+            QMessageBox.information(
+                self,
+                "No Fixes Needed",
+                "No recommended fixes to apply.\nYour data quality is already good!"
+            )
     
     # ---------- SKU CLASSIFICATION ----------
     

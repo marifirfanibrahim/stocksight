@@ -134,15 +134,29 @@ class ExportFormatter:
     
     # ---------- POWERPOINT EXPORT ----------
     
+    def _check_pptx_available(self) -> tuple:
+        # check if python-pptx is installed
+        try:
+            from pptx import Presentation
+            from pptx.util import Inches, Pt
+            return True, None
+        except ImportError:
+            return False, "python-pptx is not installed. Install it with: pip install python-pptx"
+    
     def export_powerpoint(self,
                           summary_data: Dict[str, Any],
                           charts: List[Any],
                           file_path: str) -> tuple:
         # export to powerpoint presentation
+        
+        # check if pptx is available
+        available, error_msg = self._check_pptx_available()
+        if not available:
+            return False, error_msg
+        
         try:
             from pptx import Presentation
             from pptx.util import Inches, Pt
-            from pptx.dml.color import RgbColor
             from pptx.enum.text import PP_ALIGN
             
             prs = Presentation()
@@ -162,7 +176,7 @@ class ExportFormatter:
             return True, "powerpoint created"
             
         except ImportError:
-            return False, "python-pptx not installed"
+            return False, "python-pptx is not installed. Install it with: pip install python-pptx"
         except Exception as e:
             return False, str(e)
     
@@ -300,6 +314,11 @@ class ExportFormatter:
                              file_path: str) -> tuple:
         # create 3-slide executive presentation
         
+        # check if pptx is available first
+        available, error_msg = self._check_pptx_available()
+        if not available:
+            return False, error_msg
+        
         # calculate summary data
         total_forecast = sum(sum(r.forecast) for r in forecasts.values())
         avg_mape = sum(r.metrics.get("mape", 0) for r in forecasts.values()) / max(1, len(forecasts))
@@ -399,7 +418,7 @@ class ExportFormatter:
             return True, "pdf report created"
             
         except ImportError:
-            return False, "reportlab not installed"
+            return False, "reportlab is not installed. Install it with: pip install reportlab"
         except Exception as e:
             return False, str(e)
     
