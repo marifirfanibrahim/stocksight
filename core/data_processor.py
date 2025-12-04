@@ -265,19 +265,20 @@ class DataProcessor:
         if progress_callback:
             progress_callback(80, "checking data coverage")
         
-        # check data coverage
+        # check data coverage - only penalize if truly insufficient
         if date_col and sku_col:
             date_range = (df[date_col].max() - df[date_col].min()).days
             points_per_sku = len(df) / len(self.sku_list) if self.sku_list else 0
             quality["metrics"]["data_coverage"] = {
                 "date_range_days": date_range,
                 "avg_points_per_item": points_per_sku,
-                "status": "good" if points_per_sku > 30 else "warning" if points_per_sku > 12 else "critical"
+                "status": "good" if points_per_sku >= 12 else "warning" if points_per_sku >= 7 else "critical"
             }
+            # only flag as issue if below minimum threshold
             if points_per_sku < config.DATA_QUALITY["min_data_points"]:
-                quality["issues"].append(f"low data points per item: {points_per_sku:.0f}")
+                quality["issues"].append(f"low data points per item: {points_per_sku:.1f} (minimum recommended: {config.DATA_QUALITY['min_data_points']})")
                 quality["recommendations"].append("consider weekly or monthly aggregation")
-                quality["overall_score"] -= 15
+                quality["overall_score"] -= 10
         
         # ensure score is in valid range
         quality["overall_score"] = max(0, min(100, quality["overall_score"]))

@@ -94,6 +94,9 @@ class SKUNavigator(QWidget):
         self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self._tree.header().setStretchLastSection(True)
         
+        # disable editing but allow selection
+        self._tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        
         layout.addWidget(self._tree)
         
         # action buttons
@@ -290,8 +293,8 @@ class SKUNavigator(QWidget):
         item.setData(0, Qt.UserRole, {"type": "sku", "sku": sku})
         item.setFlags(item.flags() | Qt.ItemIsSelectable)
         
-        # allow text selection for copying
-        item.setFlags(item.flags() | Qt.ItemIsEditable)
+        # disable editing but items are still selectable
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         
         # mark bookmarked items
         if sku in self._bookmarks:

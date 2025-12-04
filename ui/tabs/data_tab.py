@@ -8,10 +8,10 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFrame, QProgressBar,
     QScrollArea, QSplitter, QFileDialog, QMessageBox,
-    QGridLayout
+    QGridLayout, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QDragEnterEvent, QDropEvent
+from PyQt5.QtGui import QFont, QDragEnterEvent, QDropEvent, QColor
 from typing import Optional, Dict
 import os
 
@@ -103,7 +103,9 @@ class DataTab(QWidget):
         
         # flagged items indicator
         self._flagged_label = QLabel("")
-        self._flagged_label.setStyleSheet("color: #FFD54F;")
+        self._flagged_label.setStyleSheet("color: #FFC107;")
+        self._flagged_label.setCursor(Qt.PointingHandCursor)
+        self._flagged_label.mousePressEvent = lambda e: self._show_flagged_items()
         preview_header.addWidget(self._flagged_label)
         
         right_layout.addLayout(preview_header)
@@ -190,7 +192,7 @@ class DataTab(QWidget):
             
             value_label = QLabel("Not mapped")
             value_label.setStyleSheet("color: #9E9E9E;")
-            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # allow copy
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             self._mapping_labels[key] = value_label
             layout.addWidget(value_label, i, 1)
         
@@ -561,9 +563,27 @@ class DataTab(QWidget):
         # update flagged items display
         count = len(self._flagged_skus)
         if count > 0:
-            self._flagged_label.setText(f"⚠ {count} item(s) flagged for review")
+            self._flagged_label.setText(f"⚠ {count} item(s) flagged for review - click to view")
+            self._flagged_label.setToolTip("Click to see flagged items")
         else:
             self._flagged_label.setText("")
+            self._flagged_label.setToolTip("")
+    
+    def _show_flagged_items(self) -> None:
+        # show dialog with flagged items
+        if not self._flagged_skus:
+            return
+        
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Flagged Items")
+        dialog.setText(f"The following {len(self._flagged_skus)} item(s) are flagged for review:")
+        
+        # create list of flagged items
+        flagged_list = "\n".join([f"• {sku}" for sku in sorted(self._flagged_skus)])
+        dialog.setDetailedText(flagged_list)
+        dialog.setIcon(QMessageBox.Information)
+        dialog.setStandardButtons(QMessageBox.Ok)
+        dialog.exec_()
     
     def get_flagged_skus(self) -> set:
         # get flagged skus

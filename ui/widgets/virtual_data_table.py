@@ -77,6 +77,9 @@ class VirtualDataTable(QWidget):
         self._table.setSortingEnabled(True)
         self._table.setWordWrap(False)
         
+        # disable editing but allow selection and copying
+        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        
         # optimize for large datasets
         self._table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)

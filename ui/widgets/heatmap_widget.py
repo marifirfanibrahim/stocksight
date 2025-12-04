@@ -33,6 +33,7 @@ class HeatmapWidget(QWidget):
         self._data = None
         self._row_labels = []
         self._col_labels = []
+        self._colorbar = None
         self._setup_ui()
     
     # ---------- UI SETUP ----------
@@ -52,7 +53,7 @@ class HeatmapWidget(QWidget):
         
         # color scheme selector
         self._color_scheme = QComboBox()
-        self._color_scheme.addItems(["Blues", "Greens", "YlOrRd", "Viridis"])
+        self._color_scheme.addItems(["Blues", "Greens", "YlOrRd", "viridis"])
         self._color_scheme.currentIndexChanged.connect(self._redraw)
         header.addWidget(QLabel("Colors:"))
         header.addWidget(self._color_scheme)
@@ -123,6 +124,9 @@ class HeatmapWidget(QWidget):
         self._row_labels = []
         self._col_labels = []
         self._ax.clear()
+        if self._colorbar is not None:
+            self._colorbar.remove()
+            self._colorbar = None
         self._canvas.draw()
     
     # ---------- DRAWING ----------
@@ -130,6 +134,11 @@ class HeatmapWidget(QWidget):
     def _redraw(self) -> None:
         # redraw heatmap
         self._ax.clear()
+        
+        # clear existing colorbar
+        if self._colorbar is not None:
+            self._colorbar.remove()
+            self._colorbar = None
         
         if self._data is None or len(self._data) == 0:
             self._canvas.draw()
@@ -168,7 +177,7 @@ class HeatmapWidget(QWidget):
                 self._ax.text(j, i, text, ha="center", va="center", color=text_color, fontsize=10)
         
         # add colorbar
-        self._figure.colorbar(im, ax=self._ax, shrink=0.8)
+        self._colorbar = self._figure.colorbar(im, ax=self._ax, shrink=0.8)
         
         self._figure.tight_layout()
         self._canvas.draw()

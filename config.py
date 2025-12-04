@@ -40,7 +40,7 @@ WINDOW_DEFAULT_WIDTH = 1400
 WINDOW_DEFAULT_HEIGHT = 900
 
 # ---------- THEME SETTINGS ----------
-DEFAULT_THEME = "dark"  # dark or light
+DEFAULT_THEME = "light"  # dark or light
 
 # ============================================================================
 #                             DATA PROCESSING
@@ -80,7 +80,7 @@ COLUMN_DETECTION = {
 
 # ---------- DATA QUALITY ----------
 DATA_QUALITY = {
-    "min_data_points": 12,
+    "min_data_points": 7,
     "max_missing_pct": 30,
     "outlier_std_threshold": 3.0,
     "duplicate_check": True
@@ -375,22 +375,6 @@ PPT_TEMPLATE = {
 #                                  UI
 # ============================================================================
 
-# ---------- DARK THEME COLORS ----------
-UI_COLORS_DARK = {
-    "primary": "#4FC3F7",
-    "secondary": "#CE93D8",
-    "success": "#81C784",
-    "warning": "#FFD54F",
-    "danger": "#E57373",
-    "info": "#4DD0E1",
-    "background": "#1E1E1E",
-    "surface": "#2D2D2D",
-    "surface_light": "#3D3D3D",
-    "text": "#E0E0E0",
-    "text_secondary": "#9E9E9E",
-    "border": "#424242"
-}
-
 # ---------- LIGHT THEME COLORS ----------
 UI_COLORS_LIGHT = {
     "primary": "#2E86AB",
@@ -407,8 +391,24 @@ UI_COLORS_LIGHT = {
     "border": "#DEE2E6"
 }
 
-# default to dark theme
-UI_COLORS = UI_COLORS_DARK if DEFAULT_THEME == "dark" else UI_COLORS_LIGHT
+# ---------- DARK THEME COLORS ----------
+UI_COLORS_DARK = {
+    "primary": "#4FC3F7",
+    "secondary": "#CE93D8",
+    "success": "#81C784",
+    "warning": "#FFD54F",
+    "danger": "#E57373",
+    "info": "#4DD0E1",
+    "background": "#1E1E1E",
+    "surface": "#2D2D2D",
+    "surface_light": "#3D3D3D",
+    "text": "#E0E0E0",
+    "text_secondary": "#9E9E9E",
+    "border": "#424242"
+}
+
+# default to light theme
+UI_COLORS = UI_COLORS_LIGHT if DEFAULT_THEME == "light" else UI_COLORS_DARK
 
 # ---------- QUALITY SCORE COLORS ----------
 QUALITY_COLORS = {
@@ -478,4 +478,4 @@ def set_theme(theme: str):
     # set ui theme
     global UI_COLORS, DEFAULT_THEME
     DEFAULT_THEME = theme
-    UI_COLORS = UI_COLORS_DARK if theme == "dark" else UI_COLORS_LIGHT
+    UI_COLORS = UI_COLORS_LIGHT if theme == "light" else UI_COLORS_DARK
