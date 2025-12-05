@@ -84,6 +84,7 @@ class ClusteringConfigDialog(QDialog):
         button_layout = QHBoxLayout()
         
         reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.setToolTip("Restore factory defaults")
         reset_btn.clicked.connect(self._reset_defaults)
         button_layout.addWidget(reset_btn)
         
@@ -95,6 +96,7 @@ class ClusteringConfigDialog(QDialog):
         
         apply_btn = QPushButton("Apply")
         apply_btn.setDefault(True)
+        apply_btn.setToolTip("Save settings and update clusters")
         apply_btn.clicked.connect(self._on_apply)
         button_layout.addWidget(apply_btn)
         
@@ -103,6 +105,7 @@ class ClusteringConfigDialog(QDialog):
     def _create_volume_group(self) -> QGroupBox:
         # create volume tier configuration group
         group = QGroupBox("Volume Tier Thresholds")
+        group.setToolTip("Configure how A, B, and C items are defined")
         layout = QFormLayout(group)
         layout.setSpacing(15)
         
@@ -116,6 +119,7 @@ class ClusteringConfigDialog(QDialog):
         self._use_percentiles = QPushButton("Use Percentile-Based Thresholds")
         self._use_percentiles.setCheckable(True)
         self._use_percentiles.setChecked(True)
+        self._use_percentiles.setToolTip("If checked, tiers are defined by relative rank (e.g. top 20%). If unchecked, use absolute units.")
         self._use_percentiles.clicked.connect(self._update_preview)
         layout.addRow(self._use_percentiles)
         
@@ -124,6 +128,7 @@ class ClusteringConfigDialog(QDialog):
         self._a_threshold = QSpinBox()
         self._a_threshold.setRange(0, 100000)
         self._a_threshold.setSingleStep(100)
+        self._a_threshold.setToolTip("Minimum units per week for an item to be considered 'A' class")
         self._a_threshold.valueChanged.connect(self._update_preview)
         a_layout.addWidget(self._a_threshold)
         a_layout.addWidget(QLabel("units/week for A-items"))
@@ -135,6 +140,7 @@ class ClusteringConfigDialog(QDialog):
         self._b_threshold = QSpinBox()
         self._b_threshold.setRange(0, 10000)
         self._b_threshold.setSingleStep(10)
+        self._b_threshold.setToolTip("Minimum units per week for an item to be considered 'B' class")
         self._b_threshold.valueChanged.connect(self._update_preview)
         b_layout.addWidget(self._b_threshold)
         b_layout.addWidget(QLabel("units/week for B-items"))
@@ -146,6 +152,7 @@ class ClusteringConfigDialog(QDialog):
         self._a_percentile = QSpinBox()
         self._a_percentile.setRange(50, 99)
         self._a_percentile.setValue(80)
+        self._a_percentile.setToolTip("The cumulative volume percentage that defines A-items (Pareto principle usually uses 80%)")
         self._a_percentile.valueChanged.connect(self._update_preview)
         pct_layout.addWidget(QLabel("Top"))
         pct_layout.addWidget(self._a_percentile)
@@ -158,6 +165,7 @@ class ClusteringConfigDialog(QDialog):
     def _create_pattern_group(self) -> QGroupBox:
         # create pattern type configuration group
         group = QGroupBox("Pattern Detection Thresholds")
+        group.setToolTip("Configure rules for classifying demand patterns")
         layout = QFormLayout(group)
         layout.setSpacing(15)
         
@@ -173,6 +181,7 @@ class ClusteringConfigDialog(QDialog):
         self._seasonal_threshold.setRange(0.1, 0.9)
         self._seasonal_threshold.setSingleStep(0.05)
         self._seasonal_threshold.setDecimals(2)
+        self._seasonal_threshold.setToolTip("Percentage of annual volume occurring in Q4 (Oct-Dec) to be considered seasonal")
         self._seasonal_threshold.valueChanged.connect(self._update_preview)
         seasonal_layout.addWidget(self._seasonal_threshold)
         seasonal_layout.addWidget(QLabel("Q4 concentration for seasonal"))
@@ -185,6 +194,7 @@ class ClusteringConfigDialog(QDialog):
         self._erratic_threshold.setRange(0.3, 2.0)
         self._erratic_threshold.setSingleStep(0.1)
         self._erratic_threshold.setDecimals(2)
+        self._erratic_threshold.setToolTip("Coefficient of Variation (CV) threshold. Higher CV means more volatile demand.")
         self._erratic_threshold.valueChanged.connect(self._update_preview)
         erratic_layout.addWidget(self._erratic_threshold)
         erratic_layout.addWidget(QLabel("CV for erratic pattern"))
@@ -197,6 +207,7 @@ class ClusteringConfigDialog(QDialog):
         self._variable_threshold.setRange(0.1, 1.0)
         self._variable_threshold.setSingleStep(0.05)
         self._variable_threshold.setDecimals(2)
+        self._variable_threshold.setToolTip("Minimum CV to be considered Variable (below this is Steady)")
         self._variable_threshold.valueChanged.connect(self._update_preview)
         variable_layout.addWidget(self._variable_threshold)
         variable_layout.addWidget(QLabel("CV for variable (below = steady)"))

@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         
         open_action = QAction("&Open Data...", self)
         open_action.setShortcut(QKeySequence.Open)
+        open_action.setToolTip("Open a data file (CSV, Excel, Parquet)")
         open_action.triggered.connect(self._on_open_file)
         file_menu.addAction(open_action)
         
@@ -84,14 +85,17 @@ class MainWindow(QMainWindow):
         export_menu = file_menu.addMenu("&Export")
         
         export_csv_action = QAction("Export to &CSV", self)
+        export_csv_action.setToolTip("Export forecasts to CSV")
         export_csv_action.triggered.connect(self._on_export_csv)
         export_menu.addAction(export_csv_action)
         
         export_excel_action = QAction("Export to &Excel", self)
+        export_excel_action.setToolTip("Export forecasts to Excel")
         export_excel_action.triggered.connect(self._on_export_excel)
         export_menu.addAction(export_excel_action)
         
         export_ppt_action = QAction("Export to &PowerPoint", self)
+        export_ppt_action.setToolTip("Export forecast summary to PowerPoint")
         export_ppt_action.triggered.connect(self._on_export_ppt)
         export_menu.addAction(export_ppt_action)
         
@@ -106,6 +110,7 @@ class MainWindow(QMainWindow):
         edit_menu = menubar.addMenu("&Edit")
         
         reset_action = QAction("&Reset Session", self)
+        reset_action.setToolTip("Clear all data and start over")
         reset_action.triggered.connect(self._on_reset_session)
         edit_menu.addAction(reset_action)
         
@@ -122,8 +127,9 @@ class MainWindow(QMainWindow):
         # help menu
         help_menu = menubar.addMenu("&Help")
         
-        welcome_action = QAction("&Welcome", self)
+        welcome_action = QAction("&Quick Start Guide", self)
         welcome_action.setShortcut("F1")
+        welcome_action.setToolTip("Show the welcome screen")
         welcome_action.triggered.connect(self._show_welcome_dialog)
         help_menu.addAction(welcome_action)
         
@@ -200,6 +206,7 @@ class MainWindow(QMainWindow):
         # session info
         self._session_info_label = QLabel("No data loaded")
         self._session_info_label.setStyleSheet("color: gray;")
+        self._session_info_label.setToolTip("Current session statistics")
         toolbar.addWidget(self._session_info_label)
     
     # ---------- TABS SETUP ----------
@@ -222,6 +229,12 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._features_tab, "3. Feature Engineering")
         self._tabs.addTab(self._forecast_tab, "4. Forecast Factory")
         
+        # set tab tooltips
+        self._tabs.setTabToolTip(0, "Upload and validate your data")
+        self._tabs.setTabToolTip(1, "Explore patterns and cluster items")
+        self._tabs.setTabToolTip(2, "Create features for forecasting")
+        self._tabs.setTabToolTip(3, "Generate and export forecasts")
+        
         # disable tabs until data is loaded
         for i in range(1, 4):
             self._tabs.setTabEnabled(i, False)
@@ -242,6 +255,7 @@ class MainWindow(QMainWindow):
         # memory indicator
         self._memory_label = QLabel("Memory: --")
         self._memory_label.setStyleSheet("color: gray;")
+        self._memory_label.setToolTip("Current application memory usage")
         self._statusbar.addPermanentWidget(self._memory_label)
         
         # progress bar

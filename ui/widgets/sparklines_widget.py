@@ -41,6 +41,7 @@ class SparklineItem(QWidget):
         self.setMinimumWidth(200)
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
+        self.setToolTip(f"Click to select item: {sku}")
         
         self._setup_ui()
     
@@ -54,7 +55,7 @@ class SparklineItem(QWidget):
         self._label = QLabel(self._sku)
         self._label.setFixedWidth(100)
         self._label.setStyleSheet("font-weight: bold;")
-        self._label.setToolTip(self._sku)
+        self._label.setToolTip(f"Item Code: {self._sku}")
         layout.addWidget(self._label)
         
         # sparkline canvas
@@ -67,13 +68,16 @@ class SparklineItem(QWidget):
             min_val = np.min(self._values)
             max_val = np.max(self._values)
             stats_text = f"μ:{mean_val:,.0f}"
+            stats_tooltip = f"Mean: {mean_val:,.2f}\nMin: {min_val:,.2f}\nMax: {max_val:,.2f}"
         else:
             stats_text = "--"
+            stats_tooltip = "No data available"
         
         self._stats_label = QLabel(stats_text)
         self._stats_label.setFixedWidth(70)
         self._stats_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._stats_label.setStyleSheet("color: #666; font-size: 9pt;")
+        self._stats_label.setToolTip(stats_tooltip)
         layout.addWidget(self._stats_label)
     
     def set_selected(self, selected: bool) -> None:
@@ -254,6 +258,7 @@ class SparklinesWidget(QWidget):
         header.addWidget(QLabel("Sort:"))
         self._sort_combo = QComboBox()
         self._sort_combo.addItems(["By Name", "By Volume (High)", "By Volume (Low)", "By Trend"])
+        self._sort_combo.setToolTip("Change order of sparklines")
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         header.addWidget(self._sort_combo)
         
@@ -263,6 +268,7 @@ class SparklinesWidget(QWidget):
         self._max_items_spin.setRange(5, 100)
         self._max_items_spin.setValue(20)
         self._max_items_spin.setSuffix(" items")
+        self._max_items_spin.setToolTip("Number of sparklines to display (fewer is faster)")
         self._max_items_spin.valueChanged.connect(self._refresh_display)
         header.addWidget(self._max_items_spin)
         
