@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         # help menu
         help_menu = menubar.addMenu("&Help")
         
-        welcome_action = QAction("&Quick Start Guide", self)
+        welcome_action = QAction("&Welcome", self)
         welcome_action.setShortcut("F1")
         welcome_action.triggered.connect(self._show_welcome_dialog)
         help_menu.addAction(welcome_action)

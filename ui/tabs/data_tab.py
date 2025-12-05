@@ -20,7 +20,9 @@ from core.data_processor import DataProcessor
 from core.column_detector import ColumnDetector
 from ui.widgets.virtual_data_table import VirtualDataTable
 from ui.dialogs.column_mapping_dialog import ColumnMappingDialog
+from ui.dialogs.sheet_selection_dialog import SheetSelectionDialog
 from utils.worker_threads import WorkerThread
+from utils.file_handlers import FileHandler
 
 
 # ============================================================================
@@ -42,8 +44,11 @@ class DataTab(QWidget):
         self._session = session_model
         self._processor = DataProcessor()
         self._detector = ColumnDetector()
+        self._file_handler = FileHandler()
         self._worker = None
         self._flagged_skus = set()
+        self._pending_file_path = None
+        self._pending_sheet_name = None
         
         self._setup_ui()
         self._connect_signals()
@@ -85,6 +90,7 @@ class DataTab(QWidget):
         self._proceed_btn.setEnabled(False)
         self._proceed_btn.setMinimumHeight(40)
         self._proceed_btn.setStyleSheet(f"background-color: {config.UI_COLORS['primary']}; color: white; font-weight: bold;")
+        self._proceed_btn.setToolTip("Continue to explore patterns in your data")
         self._proceed_btn.clicked.connect(self.proceed_requested.emit)
         left_layout.addWidget(self._proceed_btn)
         
@@ -112,6 +118,7 @@ class DataTab(QWidget):
         right_layout.addLayout(preview_header)
         
         self._data_table = VirtualDataTable()
+        self._data_table.setToolTip("Preview of your uploaded data (first 1000 rows)")
         right_layout.addWidget(self._data_table)
         
         splitter.addWidget(right_panel)
@@ -124,6 +131,7 @@ class DataTab(QWidget):
     def _create_upload_section(self) -> QGroupBox:
         # create file upload section
         group = QGroupBox("1. Upload Your Data")
+        group.setToolTip("Import your sales/demand data file")
         layout = QVBoxLayout(group)
         
         # drop zone
@@ -131,6 +139,7 @@ class DataTab(QWidget):
         self._drop_zone.setFrameStyle(QFrame.StyledPanel)
         self._drop_zone.setMinimumHeight(100)
         self._drop_zone.setCursor(Qt.PointingHandCursor)
+        self._drop_zone.setToolTip("Click to browse or drag & drop your data file here")
         
         drop_layout = QVBoxLayout(self._drop_zone)
         drop_layout.setAlignment(Qt.AlignCenter)
@@ -144,9 +153,9 @@ class DataTab(QWidget):
         drop_text.setAlignment(Qt.AlignCenter)
         drop_layout.addWidget(drop_text)
         
-        self._file_types_label = QLabel("Supports: CSV, Excel, Parquet")
+        self._file_types_label = QLabel("Supports: CSV, Excel (with multiple sheets), Parquet")
         self._file_types_label.setAlignment(Qt.AlignCenter)
-        self._file_types_label.setStyleSheet("font-size: 10px;")
+        self._file_types_label.setStyleSheet("font-size: 10px; color: #666;")
         drop_layout.addWidget(self._file_types_label)
         
         layout.addWidget(self._drop_zone)
@@ -160,6 +169,7 @@ class DataTab(QWidget):
         
         self._mapping_btn = QPushButton("📋 Edit Column Mapping")
         self._mapping_btn.setEnabled(False)
+        self._mapping_btn.setToolTip("Adjust how columns are mapped to date, item, quantity, etc.")
         self._mapping_btn.clicked.connect(self._show_mapping_dialog)
         mapping_layout.addWidget(self._mapping_btn)
         
@@ -171,29 +181,32 @@ class DataTab(QWidget):
     def _create_mapping_display_section(self) -> QGroupBox:
         # create column mapping display section
         group = QGroupBox("Column Mapping")
+        group.setToolTip("Shows how your data columns are mapped")
         layout = QGridLayout(group)
         layout.setSpacing(8)
         
-        # column labels
+        # column labels with tooltips
         self._mapping_labels = {}
         
         mappings = [
-            ("date", "📅 Date:"),
-            ("sku", "🏷 Item/SKU:"),
-            ("quantity", "📊 Quantity:"),
-            ("category", "📁 Category:"),
-            ("price", "💰 Price:"),
-            ("promo", "🎯 Promotion:")
+            ("date", "📅 Date:", "The column containing dates/timestamps"),
+            ("sku", "🏷 Item/SKU:", "The column identifying unique items"),
+            ("quantity", "📊 Quantity:", "The column with sales/demand numbers"),
+            ("category", "📁 Category:", "Optional grouping for items"),
+            ("price", "💰 Price:", "Optional price data for analysis"),
+            ("promo", "🎯 Promotion:", "Optional promotion flags")
         ]
         
-        for i, (key, label_text) in enumerate(mappings):
+        for i, (key, label_text, tooltip) in enumerate(mappings):
             label = QLabel(label_text)
             label.setStyleSheet("font-weight: bold;")
+            label.setToolTip(tooltip)
             layout.addWidget(label, i, 0)
             
             value_label = QLabel("Not mapped")
             value_label.setStyleSheet("color: #9E9E9E;")
             value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            value_label.setToolTip(f"Click 'Edit Column Mapping' to set the {key} column")
             self._mapping_labels[key] = value_label
             layout.addWidget(value_label, i, 1)
         
@@ -202,6 +215,7 @@ class DataTab(QWidget):
     def _create_quality_section(self) -> QGroupBox:
         # create data quality section
         group = QGroupBox("2. Data Quality Check")
+        group.setToolTip("Automatic assessment of your data quality")
         layout = QVBoxLayout(group)
         
         # quality score
@@ -211,6 +225,7 @@ class DataTab(QWidget):
         self._quality_score_label.setFont(QFont("Segoe UI", 36, QFont.Bold))
         self._quality_score_label.setAlignment(Qt.AlignCenter)
         self._quality_score_label.setMinimumWidth(80)
+        self._quality_score_label.setToolTip("Overall data quality score (0-100)")
         score_layout.addWidget(self._quality_score_label)
         
         score_info = QVBoxLayout()
@@ -220,6 +235,7 @@ class DataTab(QWidget):
         
         self._quality_details_label = QLabel("")
         self._quality_details_label.setWordWrap(True)
+        self._quality_details_label.setToolTip("Detailed quality metrics")
         score_info.addWidget(self._quality_details_label)
         
         score_layout.addLayout(score_info)
@@ -234,6 +250,7 @@ class DataTab(QWidget):
         self._issues_label = QLabel("")
         self._issues_label.setWordWrap(True)
         self._issues_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._issues_label.setToolTip("Issues found in your data that may affect forecasting")
         issues_layout.addWidget(self._issues_label)
         self._issues_frame.setVisible(False)
         layout.addWidget(self._issues_frame)
@@ -243,6 +260,7 @@ class DataTab(QWidget):
         
         self._fix_btn = QPushButton("🔧 Apply Recommended Fixes")
         self._fix_btn.setEnabled(False)
+        self._fix_btn.setToolTip("Automatically fix common data issues like missing values and duplicates")
         self._fix_btn.clicked.connect(self._apply_fixes)
         fix_layout.addWidget(self._fix_btn)
         
@@ -254,6 +272,7 @@ class DataTab(QWidget):
     def _create_classification_section(self) -> QGroupBox:
         # create sku classification section
         group = QGroupBox("3. Item Classification (ABC Analysis)")
+        group.setToolTip("Items grouped by volume using the Pareto (80/20) principle")
         layout = QVBoxLayout(group)
         
         # classification display
@@ -261,22 +280,29 @@ class DataTab(QWidget):
         class_layout = QHBoxLayout(self._class_frame)
         class_layout.setSpacing(20)
         
+        tier_tooltips = {
+            "A": "High-volume items - top 20% contributing ~80% of volume. These get detailed forecasting.",
+            "B": "Medium-volume items - next 30% of items. Balanced forecasting approach.",
+            "C": "Low-volume items - bottom 50% of items. Simple forecasting for efficiency."
+        }
+        
         for tier, color, desc in [("A", "#4CAF50", "High Volume"), 
                                    ("B", "#FF9800", "Medium Volume"), 
                                    ("C", "#F44336", "Low Volume")]:
             tier_widget = QWidget()
+            tier_widget.setToolTip(tier_tooltips[tier])
             tier_layout = QVBoxLayout(tier_widget)
             tier_layout.setAlignment(Qt.AlignCenter)
             tier_layout.setSpacing(4)
             
-            # tier letter - larger font
+            # tier letter
             tier_label = QLabel(tier)
             tier_label.setFont(QFont("Segoe UI", 32, QFont.Bold))
             tier_label.setAlignment(Qt.AlignCenter)
             tier_label.setStyleSheet(f"color: {color};")
             tier_layout.addWidget(tier_label)
             
-            # count and percentage - larger font
+            # count and percentage
             count_label = QLabel("--")
             count_label.setObjectName(f"tier_{tier}_count")
             count_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
@@ -284,7 +310,7 @@ class DataTab(QWidget):
             count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             tier_layout.addWidget(count_label)
             
-            # description - larger font
+            # description
             desc_label = QLabel(desc)
             desc_label.setFont(QFont("Segoe UI", 11))
             desc_label.setStyleSheet("color: #555;")
@@ -298,6 +324,7 @@ class DataTab(QWidget):
         # explanation
         explain = QLabel("Items are classified using the 80/20 rule based on total volume")
         explain.setStyleSheet("font-style: italic; color: #666;")
+        explain.setToolTip("A-items are the vital few, C-items are the trivial many")
         layout.addWidget(explain)
         
         return group
@@ -328,10 +355,6 @@ class DataTab(QWidget):
     
     def _browse_file(self) -> None:
         # open file browser starting from app folder
-        from utils.file_handlers import FileHandler
-        
-        handler = FileHandler()
-        
         # start from app folder instead of home directory
         start_dir = str(config.BASE_DIR)
         
@@ -339,18 +362,62 @@ class DataTab(QWidget):
             self,
             "Open Data File",
             start_dir,
-            handler.get_open_filter()
+            self._file_handler.get_open_filter()
         )
         
         if file_path:
             self._load_file(file_path)
     
     def _load_file(self, file_path: str) -> None:
-        # load data file
+        # load data file - check for multiple sheets first
+        self._pending_file_path = file_path
+        self._pending_sheet_name = None
+        
+        # check if excel file with multiple sheets
+        if file_path.lower().endswith(('.xlsx', '.xls')):
+            sheet_info = self._processor.get_excel_sheet_info(file_path)
+            
+            if len(sheet_info) > 1:
+                # show sheet selection dialog
+                dialog = SheetSelectionDialog(file_path, sheet_info, self)
+                dialog.sheet_selected.connect(self._on_sheet_selected)
+                
+                if dialog.exec_() != dialog.Accepted:
+                    # user cancelled
+                    self._pending_file_path = None
+                    return
+                
+                # sheet name set by signal
+            elif len(sheet_info) == 1:
+                # single sheet - use it directly
+                self._pending_sheet_name = list(sheet_info.keys())[0]
+        
+        # proceed with loading
+        self._do_load_file()
+    
+    def _on_sheet_selected(self, sheet_name: str) -> None:
+        # handle sheet selection from dialog
+        self._pending_sheet_name = sheet_name
+    
+    def _do_load_file(self) -> None:
+        # actually load the file
+        if not self._pending_file_path:
+            return
+        
+        file_path = self._pending_file_path
+        sheet_name = self._pending_sheet_name
+        
         self._file_info_label.setText(f"Loading: {os.path.basename(file_path)}...")
         
+        if sheet_name:
+            self._file_info_label.setText(f"Loading: {os.path.basename(file_path)} (sheet: {sheet_name})...")
+        
         # run in background
-        self._worker = WorkerThread(self._processor.load_file, file_path)
+        self._worker = WorkerThread(
+            self._processor.load_file, 
+            file_path, 
+            sheet_name
+        )
         self._worker.result_signal.connect(self._on_file_loaded)
         self._worker.error_signal.connect(self._on_load_error)
         self._worker.start()
@@ -362,8 +429,9 @@ class DataTab(QWidget):
         if success:
             # update ui
             file_info = self._processor.get_summary_stats()
+            sheet_info = f" (sheet: {self._pending_sheet_name})" if self._pending_sheet_name else ""
             self._file_info_label.setText(
-                f"✓ Loaded {file_info.get('total_rows', 0):,} rows"
+                f"✓ Loaded {file_info.get('total_rows', 0):,} rows{sheet_info}"
             )
             
             # detect columns
@@ -403,9 +471,11 @@ class DataTab(QWidget):
                 col_name = mapping[key]
                 label.setText(f"→ {col_name}")
                 label.setStyleSheet("color: #81C784; font-weight: bold;")
+                label.setToolTip(f"Mapped to column: {col_name}")
             else:
                 label.setText("Not mapped")
                 label.setStyleSheet("color: #9E9E9E;")
+                label.setToolTip(f"No column mapped for {key}")
     
     # ---------- COLUMN MAPPING ----------
     
@@ -592,7 +662,7 @@ class DataTab(QWidget):
         count = len(self._flagged_skus)
         if count > 0:
             self._flagged_label.setText(f"⚠ {count} item(s) flagged for review - click to view")
-            self._flagged_label.setToolTip("Click to see flagged items")
+            self._flagged_label.setToolTip("Items flagged from anomaly detection for data review")
         else:
             self._flagged_label.setText("")
             self._flagged_label.setToolTip("")

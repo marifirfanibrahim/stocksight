@@ -62,6 +62,7 @@ class ForecastTab(QWidget):
         
         header = QLabel("Forecast Factory")
         header.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        header.setToolTip("Generate demand forecasts for your items")
         header_layout.addWidget(header)
         
         header_layout.addStretch()
@@ -69,16 +70,19 @@ class ForecastTab(QWidget):
         # strategy indicator
         self._strategy_label = QLabel("Strategy: Not Set")
         self._strategy_label.setStyleSheet("color: gray;")
+        self._strategy_label.setToolTip("Current forecasting strategy - click Configure to change")
         header_layout.addWidget(self._strategy_label)
         
         # configure button
         self._config_btn = QPushButton("⚙ Configure")
+        self._config_btn.setToolTip("Set forecasting strategy, horizon, and frequency")
         self._config_btn.clicked.connect(self._show_settings)
         header_layout.addWidget(self._config_btn)
         
         # run forecast button
         self._run_btn = QPushButton("▶ Generate Forecasts")
         self._run_btn.setMinimumWidth(150)
+        self._run_btn.setToolTip("Run forecasting models to generate predictions for all items")
         self._run_btn.clicked.connect(self._run_forecasts)
         header_layout.addWidget(self._run_btn)
         
@@ -105,6 +109,10 @@ class ForecastTab(QWidget):
         results_header.addWidget(QLabel("Show:"))
         self._filter_combo = QComboBox()
         self._filter_combo.addItems(["All Items", "A-Items", "B-Items", "C-Items", "Problems Only", "Bookmarked"])
+        self._filter_combo.setToolTip(
+            "Filter results by item tier or status\n"
+            "Problems Only: Items with MAPE > 30%"
+        )
         self._filter_combo.currentIndexChanged.connect(self._apply_filter)
         results_header.addWidget(self._filter_combo)
         
@@ -118,6 +126,7 @@ class ForecastTab(QWidget):
         self._results_table.setSortingEnabled(True)
         self._results_table.setSelectionBehavior(QTableView.SelectRows)
         self._results_table.horizontalHeader().setStretchLastSection(True)
+        self._results_table.setToolTip("Click a row to see forecast chart and details")
         self._results_table.clicked.connect(self._on_result_selected)
         
         top_layout.addWidget(self._results_table)
@@ -139,6 +148,7 @@ class ForecastTab(QWidget):
         chart_layout.addWidget(chart_label)
         
         self._chart = TimeSeriesChart()
+        self._chart.setToolTip("Historical data (solid) and forecast (dashed) with confidence intervals")
         chart_layout.addWidget(self._chart)
         
         bottom_layout.addWidget(chart_widget, stretch=2)
@@ -178,11 +188,13 @@ class ForecastTab(QWidget):
     def _create_summary_group(self) -> QGroupBox:
         # create summary group
         group = QGroupBox("Forecast Summary")
+        group.setToolTip("Overview of all generated forecasts")
         layout = QVBoxLayout(group)
         
         self._summary_label = QLabel("No forecasts generated yet")
         self._summary_label.setWordWrap(True)
         self._summary_label.setStyleSheet("color: gray;")
+        self._summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._summary_label)
         
         return group
@@ -190,11 +202,18 @@ class ForecastTab(QWidget):
     def _create_metrics_group(self) -> QGroupBox:
         # create metrics group
         group = QGroupBox("Selected Item Metrics")
+        group.setToolTip("Accuracy metrics for selected forecast")
         layout = QVBoxLayout(group)
         
         self._metrics_label = QLabel("Select an item to view metrics")
         self._metrics_label.setWordWrap(True)
         self._metrics_label.setStyleSheet("color: gray;")
+        self._metrics_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._metrics_label.setToolTip(
+            "MAPE: Mean Absolute Percentage Error (lower is better)\n"
+            "MAE: Mean Absolute Error\n"
+            "RMSE: Root Mean Square Error"
+        )
         layout.addWidget(self._metrics_label)
         
         return group
@@ -202,27 +221,32 @@ class ForecastTab(QWidget):
     def _create_export_group(self) -> QGroupBox:
         # create export group
         group = QGroupBox("Export")
+        group.setToolTip("Export forecasts to various formats")
         layout = QVBoxLayout(group)
         
         # quick export buttons
         self._export_csv_btn = QPushButton("📄 Export to CSV")
         self._export_csv_btn.setEnabled(False)
+        self._export_csv_btn.setToolTip("Export all forecasts to CSV file for use in ERP systems or Excel")
         self._export_csv_btn.clicked.connect(self._export_csv)
         layout.addWidget(self._export_csv_btn)
         
         self._export_excel_btn = QPushButton("📊 Export to Excel")
         self._export_excel_btn.setEnabled(False)
+        self._export_excel_btn.setToolTip("Export to formatted Excel workbook with multiple sheets")
         self._export_excel_btn.clicked.connect(self._export_excel)
         layout.addWidget(self._export_excel_btn)
         
         self._export_ppt_btn = QPushButton("📽 Export to PowerPoint")
         self._export_ppt_btn.setEnabled(False)
+        self._export_ppt_btn.setToolTip("Create 3-slide executive summary presentation")
         self._export_ppt_btn.clicked.connect(self._export_ppt)
         layout.addWidget(self._export_ppt_btn)
         
         # export wizard button
         self._export_wizard_btn = QPushButton("🧙 Export Wizard...")
         self._export_wizard_btn.setEnabled(False)
+        self._export_wizard_btn.setToolTip("Advanced export options with full customization")
         self._export_wizard_btn.clicked.connect(self._show_export_wizard)
         layout.addWidget(self._export_wizard_btn)
         

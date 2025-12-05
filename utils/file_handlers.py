@@ -6,7 +6,7 @@ integrates with pyqt file dialogs
 
 import pandas as pd
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import json
 import pickle
 
@@ -99,13 +99,77 @@ class FileHandler:
         # fallback with error handling
         return pd.read_csv(path, encoding="utf-8", errors="replace")
     
-    def _read_excel(self, path: Path) -> pd.DataFrame:
-        # read excel file
+    def _read_excel(self, path: Path, sheet_name: Optional[str] = None) -> pd.DataFrame:
+        # read excel file with optional sheet selection
+        if sheet_name:
+            return pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
         return pd.read_excel(path, engine="openpyxl")
     
     def _read_parquet(self, path: Path) -> pd.DataFrame:
         # read parquet file
         return pd.read_parquet(path)
+    
+    # ---------- EXCEL SHEET HANDLING ----------
+    
+    def get_excel_sheets(self, file_path: str) -> List[str]:
+        # get list of sheet names from excel file
+        path = Path(file_path)
+        
+        if not path.exists():
+            return []
+        
+        if path.suffix.lower() not in [".xlsx", ".xls"]:
+            return []
+        
+        try:
+            xlsx = pd.ExcelFile(path, engine="openpyxl")
+            return xlsx.sheet_names
+        except Exception:
+            return []
+    
+    def get_excel_sheet_info(self, file_path: str) -> Dict[str, int]:
+        # get sheet names with row counts
+        path = Path(file_path)
+        
+        if not path.exists():
+            return {}
+        
+        if path.suffix.lower() not in [".xlsx", ".xls"]:
+            return {}
+        
+        try:
+            xlsx = pd.ExcelFile(path, engine="openpyxl")
+            sheet_info = {}
+            
+            for sheet_name in xlsx.sheet_names:
+                try:
+                    # count rows efficiently using first column only
+                    df = pd.read_excel(xlsx, sheet_name=sheet_name, usecols=[0])
+                    sheet_info[sheet_name] = len(df)
+                except Exception:
+                    sheet_info[sheet_name] = 0
+            
+            return sheet_info
+        except Exception:
+            return {}
+    
+    def has_multiple_sheets(self, file_path: str) -> bool:
+        # check if excel file has multiple worksheets
+        sheets = self.get_excel_sheets(file_path)
+        return len(sheets) > 1
+    
+    def read_excel_sheet(self, file_path: str, sheet_name: str) -> Tuple[Optional[pd.DataFrame], str]:
+        # read specific sheet from excel file
+        path = Path(file_path)
+        
+        if not path.exists():
+            return None, "file not found"
+        
+        try:
+            df = pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
+            return df, f"loaded {len(df):,} rows from '{sheet_name}'"
+        except Exception as e:
+            return None, f"error reading sheet: {str(e)}"
     
     # ---------- FILE WRITING ----------
     
@@ -203,10 +267,18 @@ class FileHandler:
         if not path.exists():
             return {}
         
-        return {
+        info = {
             "name": path.name,
             "extension": path.suffix,
             "size_mb": path.stat().st_size / (1024 * 1024),
             "directory": str(path.parent),
             "modified": path.stat().st_mtime
         }
+        
+        # add sheet info for excel files
+        if path.suffix.lower() in [".xlsx", ".xls"]:
+            sheets = self.get_excel_sheets(file_path)
+            info["sheets"] = sheets
+            info["sheet_count"] = len(sheets)
+        
+        return info

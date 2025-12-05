@@ -30,7 +30,7 @@ CACHE_DIR = APP_DATA_DIR / "cache"
 
 # ---------- APP INFO ----------
 APP_NAME = "StockSight"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.3.6"
 APP_AUTHOR = "StockSight Team"
 
 # ---------- WINDOW SETTINGS ----------

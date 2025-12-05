@@ -53,6 +53,7 @@ class HeatmapWidget(QWidget):
         # color scheme selector
         self._color_scheme = QComboBox()
         self._color_scheme.addItems(["Blues", "Greens", "YlOrRd", "viridis"])
+        self._color_scheme.setToolTip("Change the color scheme for the heatmap")
         self._color_scheme.currentIndexChanged.connect(self._redraw)
         header.addWidget(QLabel("Colors:"))
         header.addWidget(self._color_scheme)
@@ -62,6 +63,7 @@ class HeatmapWidget(QWidget):
         # matplotlib figure
         self._figure = Figure(figsize=(8, 5), dpi=100)
         self._canvas = FigureCanvas(self._figure)
+        self._canvas.setToolTip("Click on a cell to filter items by that cluster")
         
         # connect click event
         self._canvas.mpl_connect("button_press_event", self._on_click)
@@ -71,6 +73,7 @@ class HeatmapWidget(QWidget):
         # summary label
         self._summary_label = QLabel("")
         self._summary_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._summary_label.setToolTip("Summary of cluster distribution")
         layout.addWidget(self._summary_label)
     
     # ---------- DATA MANAGEMENT ----------
@@ -91,7 +94,6 @@ class HeatmapWidget(QWidget):
     
     def set_cluster_matrix(self, cluster_data: Dict) -> None:
         # set data from cluster summary
-        # expects dict with volume_tier and pattern counts
         tiers = ["A", "B", "C"]
         patterns = ["seasonal", "erratic", "variable", "steady"]
         
@@ -127,7 +129,7 @@ class HeatmapWidget(QWidget):
     # ---------- DRAWING ----------
     
     def _redraw(self) -> None:
-        # redraw heatmap - clear entire figure and recreate
+        # redraw heatmap
         self._figure.clear()
         
         if self._data is None or len(self._data) == 0:

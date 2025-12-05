@@ -31,7 +31,10 @@ class DataProcessor:
         
     # ---------- FILE LOADING ----------
     
-    def load_file(self, file_path: str, progress_callback: Optional[callable] = None) -> Tuple[bool, str]:
+    def load_file(self, 
+                  file_path: str, 
+                  sheet_name: Optional[str] = None,
+                  progress_callback: Optional[callable] = None) -> Tuple[bool, str]:
         # load data file with appropriate reader
         path = Path(file_path)
         
@@ -54,7 +57,7 @@ class DataProcessor:
             if suffix == ".csv":
                 self.raw_data = self._load_csv(path, progress_callback)
             elif suffix in [".xlsx", ".xls"]:
-                self.raw_data = self._load_excel(path, progress_callback)
+                self.raw_data = self._load_excel(path, sheet_name, progress_callback)
             elif suffix == ".parquet":
                 self.raw_data = self._load_parquet(path, progress_callback)
             else:
@@ -98,10 +101,19 @@ class DataProcessor:
                 progress_callback(50, "parsing csv")
             return pd.read_csv(path)
     
-    def _load_excel(self, path: Path, progress_callback: Optional[callable] = None) -> pd.DataFrame:
-        # load excel file
+    def _load_excel(self, 
+                    path: Path, 
+                    sheet_name: Optional[str] = None,
+                    progress_callback: Optional[callable] = None) -> pd.DataFrame:
+        # load excel file with optional sheet selection
         if progress_callback:
             progress_callback(50, "parsing excel")
+        
+        # if sheet name provided, load that sheet
+        if sheet_name:
+            return pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
+        
+        # otherwise load first sheet (default behavior)
         return pd.read_excel(path, engine="openpyxl")
     
     def _load_parquet(self, path: Path, progress_callback: Optional[callable] = None) -> pd.DataFrame:
@@ -109,6 +121,51 @@ class DataProcessor:
         if progress_callback:
             progress_callback(50, "parsing parquet")
         return pd.read_parquet(path)
+    
+    def get_excel_sheet_info(self, file_path: str) -> Dict[str, int]:
+        # get sheet names and row counts for excel file
+        path = Path(file_path)
+        
+        if not path.exists():
+            return {}
+        
+        if path.suffix.lower() not in [".xlsx", ".xls"]:
+            return {}
+        
+        try:
+            # read excel file to get sheet names
+            xlsx = pd.ExcelFile(path, engine="openpyxl")
+            sheet_info = {}
+            
+            for sheet_name in xlsx.sheet_names:
+                # get row count without loading entire sheet
+                try:
+                    # read just header to get structure
+                    df_sample = pd.read_excel(
+                        xlsx, 
+                        sheet_name=sheet_name, 
+                        nrows=0
+                    )
+                    
+                    # count rows efficiently
+                    df_count = pd.read_excel(
+                        xlsx,
+                        sheet_name=sheet_name,
+                        usecols=[0]  # only first column
+                    )
+                    sheet_info[sheet_name] = len(df_count)
+                except Exception:
+                    sheet_info[sheet_name] = 0
+            
+            return sheet_info
+            
+        except Exception:
+            return {}
+    
+    def has_multiple_sheets(self, file_path: str) -> bool:
+        # check if excel file has multiple sheets
+        sheet_info = self.get_excel_sheet_info(file_path)
+        return len(sheet_info) > 1
     
     # ---------- COLUMN MAPPING ----------
     
@@ -265,7 +322,7 @@ class DataProcessor:
         if progress_callback:
             progress_callback(80, "checking data coverage")
         
-        # check data coverage - only penalize if truly insufficient
+        # check data coverage
         if date_col and sku_col:
             date_range = (df[date_col].max() - df[date_col].min()).days
             points_per_sku = len(df) / len(self.sku_list) if self.sku_list else 0
@@ -274,7 +331,6 @@ class DataProcessor:
                 "avg_points_per_item": points_per_sku,
                 "status": "good" if points_per_sku >= 12 else "warning" if points_per_sku >= 7 else "critical"
             }
-            # only flag as issue if below minimum threshold
             if points_per_sku < config.DATA_QUALITY["min_data_points"]:
                 quality["issues"].append(f"low data points per item: {points_per_sku:.1f} (minimum recommended: {config.DATA_QUALITY['min_data_points']})")
                 quality["recommendations"].append("consider weekly or monthly aggregation")
