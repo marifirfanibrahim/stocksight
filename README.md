@@ -183,7 +183,7 @@ You can adjust these values without touching UI code.
 ## 7. Notes and Tips
 For large datasets (10K+ SKUs × 2+ years daily), let the app complete each step rather than opening many windows at once.
 
-Use the Data Cleaning & Anomalies help item in the Help menu to understand how:
+Use the Learn help item in the Help menu to understand how:
 * Data Health fixes in Tab 1,
 * Abnormal Data review in Tab 1,
 * Anomaly detection in Tab 2 work together.
@@ -194,3 +194,4 @@ It is usually enough to:
 * Then move on to forecasting.
   
 If you are unsure about a setting, the defaults are chosen to be safe and reasonable for most business use cases.
+
