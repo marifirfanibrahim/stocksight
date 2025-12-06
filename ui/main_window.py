@@ -1,474 +1,680 @@
 """
-main window setup
-create gui structure
+main window module
+primary application window
+manages tabs and navigation
 """
 
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QStatusBar, QMenuBar, QMenu, QAction,
+    QMessageBox, QLabel, QProgressBar, QToolBar,
+    QFileDialog
+)
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QKeySequence
+from typing import Optional
 
-# ================ IMPORTS ================
-
-import dearpygui.dearpygui as dpg
-
-from config import Paths, GUIConfig, DataConfig, AutoTSConfig, ScenarioConfig
-from .themes import create_all_themes
-from .column_mapper import create_column_mapping_dialog
-from . import callbacks
-
-
-# ================ UI HELPER FUNCTIONS ================
-
-def _create_controls_tab_content():
-    """
-    create content for controls tab
-    """
-    dpg.add_spacer(height=5)
-    
-    # ---------- DATA SECTION ----------
-    dpg.add_text("DATA", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    upload_btn = dpg.add_button(label="Upload CSV/Excel", callback=callbacks.upload_callback, width=-1)
-    dpg.bind_item_theme(upload_btn, "upload_button_theme")
-    
-    dpg.add_spacer(height=5)
-    
-    remap_btn = dpg.add_button(label="Remap Columns", callback=callbacks.remap_columns_callback, width=-1)
-    dpg.bind_item_theme(remap_btn, "export_button_theme")
-    
-    dpg.add_spacer(height=5)
-    
-    remove_btn = dpg.add_button(label="Remove Data", callback=callbacks.remove_data_callback, width=-1)
-    dpg.bind_item_theme(remove_btn, "danger_button_theme")
-    
-    dpg.add_spacer(height=10)
-    
-    # ---------- SEASONALITY INFO ----------
-    dpg.add_text("SEASONALITY", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    dpg.add_text("No data analyzed", tag="seasonality_info_text", color=(150, 150, 150), wrap=280)
-    
-    dpg.add_spacer(height=15)
-    
-    # ---------- FORECAST SECTION ----------
-    dpg.add_text("FORECAST", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    dpg.add_text("Days:")
-    dpg.add_input_int(default_value=AutoTSConfig.DEFAULT_FORECAST_DAYS, 
-                      min_value=AutoTSConfig.MIN_FORECAST_DAYS, 
-                      max_value=365,
-                      min_clamped=True,
-                      max_clamped=True,
-                      callback=callbacks.forecast_days_callback, 
-                      tag="forecast_days", width=-1)
-    
-    dpg.add_text("Granularity:")
-    dpg.add_combo(DataConfig.GROUP_OPTIONS, default_value="Daily", 
-                  tag="forecast_granularity_combo", 
-                  callback=callbacks.forecast_granularity_callback, width=-1)
-    
-    dpg.add_text("Speed:")
-    speed_combo = dpg.add_combo(["Superfast", "Fast", "Balanced", "Accurate"], 
-                                default_value="Fast",
-                                tag="forecast_speed_combo",
-                                callback=callbacks.forecast_speed_callback, width=-1)
-    
-    with dpg.tooltip(speed_combo):
-        dpg.add_text("Superfast:", color=GUIConfig.HEADER_COLOR)
-        dpg.add_text("Quickest. Basic models only.", wrap=220)
-        dpg.add_spacer(height=3)
-        dpg.add_text("Fast:", color=GUIConfig.HEADER_COLOR)
-        dpg.add_text("Good balance of speed and accuracy.", wrap=220)
-        dpg.add_spacer(height=3)
-        dpg.add_text("Balanced:", color=GUIConfig.HEADER_COLOR)
-        dpg.add_text("More models tested. Better results.", wrap=220)
-        dpg.add_spacer(height=3)
-        dpg.add_text("Accurate:", color=GUIConfig.HEADER_COLOR)
-        dpg.add_text("Most thorough. Slowest.", wrap=220)
-    
-    dpg.add_spacer(height=10)
-    
-    # forecast button
-    forecast_btn = dpg.add_button(label="Run Forecast", tag="forecast_btn",
-                                  callback=callbacks.forecast_callback, 
-                                  width=-1, height=40)
-    dpg.bind_item_theme(forecast_btn, "forecast_button_theme")
-    
-    dpg.add_spacer(height=15)
-    
-    # ---------- MODEL SECTION ----------
-    dpg.add_text("MODEL", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    dpg.add_text("No model loaded", tag="loaded_model_text", color=(150, 150, 150))
-    
-    with dpg.group(horizontal=True):
-        dpg.add_button(label="Load Model", callback=callbacks.load_model_callback, width=100)
-        
-        use_model_btn = dpg.add_button(label="Use Model", tag="use_model_btn",
-                                       callback=callbacks.forecast_with_model_callback, 
-                                       width=100, show=False)
-        dpg.bind_item_theme(use_model_btn, "forecast_button_theme")
-    
-    dpg.add_spacer(height=15)
-    
-    # ---------- EXPORT SECTION ----------
-    dpg.add_text("EXPORT", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    dpg.add_text("Directory:", color=(150, 150, 150))
-    dpg.add_input_text(default_value=str(Paths.USER_OUTPUT), tag="export_dir_text", 
-                       width=-1, readonly=True)
-    
-    with dpg.group(horizontal=True):
-        dpg.add_button(label="Browse", callback=callbacks.select_export_dir_callback, width=70)
-        dpg.add_button(label="Reset", callback=callbacks.reset_export_dir_callback, width=70)
-    
-    dpg.add_spacer(height=5)
-    
-    with dpg.group(horizontal=True):
-        export_btn = dpg.add_button(label="Export", callback=callbacks.export_callback, width=70)
-        dpg.bind_item_theme(export_btn, "export_button_theme")
-        
-        model_btn = dpg.add_button(label="Save Model", callback=callbacks.export_model_callback, width=85)
-        dpg.bind_item_theme(model_btn, "export_button_theme")
-        
-
-def _create_scenarios_tab_content():
-    """
-    create content for scenarios tab
-    """
-    dpg.add_spacer(height=5)
-    
-    dpg.add_text("SCENARIO", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    dpg.add_text("Type:")
-    scenario_combo = dpg.add_combo(["Demand Spike", "Supply Delay"], default_value="Demand Spike", 
-                                   tag="scenario_type", width=-1, 
-                                   callback=callbacks.scenario_type_changed_callback)
-    
-    with dpg.tooltip(scenario_combo):
-        dpg.add_text("Demand Spike:", color=GUIConfig.HEADER_COLOR)
-        dpg.add_text("Multiply demand by factor.\nUse >1 for increase, <1 for decrease.", wrap=220)
-        dpg.add_spacer(height=5)
-        dpg.add_text("Supply Delay:", color=GUIConfig.HEADER_COLOR)
-        dpg.add_text("Shift quantities forward.\nSimulates delayed shipments.", wrap=220)
-    
-    dpg.add_spacer(height=10)
-    
-    dpg.add_text("Target SKU:")
-    dpg.add_combo([], tag="scenario_sku", width=-1)
-    
-    dpg.add_spacer(height=10)
-    
-    dpg.add_text("PARAMETERS", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    with dpg.group(tag="spike_multiplier_group", show=True):
-        dpg.add_text("Multiplier:")
-        multiplier_slider = dpg.add_slider_float(default_value=ScenarioConfig.DEFAULT_SPIKE_MULTIPLIER,
-                                                  min_value=ScenarioConfig.MIN_SPIKE_MULTIPLIER,
-                                                  max_value=ScenarioConfig.MAX_SPIKE_MULTIPLIER,
-                                                  tag="spike_multiplier", width=-1, format="%.1fx")
-        with dpg.tooltip(multiplier_slider):
-            dpg.add_text("1.0 = no change\n1.5 = 50% increase\n2.0 = double\n0.5 = 50% decrease")
-    
-    with dpg.group(tag="delay_days_group", show=False):
-        dpg.add_text("Delay Days:")
-        delay_slider = dpg.add_slider_int(default_value=ScenarioConfig.DEFAULT_DELAY_DAYS,
-                                           min_value=ScenarioConfig.MIN_DELAY_DAYS,
-                                           max_value=ScenarioConfig.MAX_DELAY_DAYS,
-                                           tag="delay_days", width=-1)
-        with dpg.tooltip(delay_slider):
-            dpg.add_text("Days to shift forecast forward")
-    
-    dpg.add_spacer(height=10)
-    
-    dpg.add_text("DATE RANGE", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    
-    with dpg.group(horizontal=True):
-        dpg.add_button(label="Week", callback=callbacks.set_date_this_week, width=55)
-        dpg.add_button(label="Month", callback=callbacks.set_date_this_month, width=55)
-        dpg.add_button(label="Next", callback=callbacks.set_date_next_month, width=55)
-    
-    dpg.add_spacer(height=5)
-    
-    dpg.add_text("Start:", color=(150, 150, 150))
-    dpg.add_date_picker(tag="scenario_start_date", default_value={
-        'year': 124, 'month': 0, 'month_day': 1
-    })
-    
-    dpg.add_text("End:", color=(150, 150, 150))
-    dpg.add_date_picker(tag="scenario_end_date", default_value={
-        'year': 124, 'month': 0, 'month_day': 31
-    })
-    
-    dpg.add_spacer(height=10)
-    
-    with dpg.group(horizontal=True):
-        apply_btn = dpg.add_button(label="Apply", 
-                                   callback=callbacks.apply_scenario_callback, 
-                                   width=80, height=30)
-        dpg.bind_item_theme(apply_btn, "apply_scenario_theme")
-        
-        dpg.add_spacer(width=5)
-        
-        reset_btn = dpg.add_button(label="Reset All", 
-                                   callback=callbacks.reset_all_scenarios_callback, 
-                                   width=80, height=30)
-        dpg.bind_item_theme(reset_btn, "reset_scenario_theme")
+import config
+from ui.models.session_model import SessionModel
+from ui.tabs.data_tab import DataTab
+from ui.tabs.explore_tab import ExploreTab
+from ui.tabs.features_tab import FeaturesTab
+from ui.tabs.forecast_tab import ForecastTab
+from ui.dialogs.about_dialog import AboutDialog
+from ui.dialogs.welcome_dialog import WelcomeDialog
+from ui.dialogs.help_dialog import DataCleaningHelpDialog
+from utils.memory_manager import MemoryManager
+from utils.file_handlers import FileHandler
 
 
-def _create_chart_tab_content():
-    """
-    create content for chart tab
-    """
-    with dpg.group(horizontal=True):
-        dpg.add_text("Grouping:")
-        dpg.add_combo(DataConfig.GROUP_OPTIONS, default_value="Daily",
-                      tag="chart_grouping_combo", width=90,
-                      callback=callbacks.chart_grouping_changed_callback)
-        
-        dpg.add_spacer(width=10)
-        
-        dpg.add_text("SKU:")
-        dpg.add_combo(["All SKUs"], default_value="All SKUs",
-                      tag="chart_sku_combo", width=120,
-                      callback=callbacks.chart_sku_changed_callback)
-        
-        dpg.add_spacer(width=10)
-        
-        summary_btn = dpg.add_button(label="Show Summary", tag="summary_toggle_btn",
-                                     callback=callbacks.toggle_summary_callback,
-                                     width=100)
-        dpg.bind_item_theme(summary_btn, "summary_chart_theme")
-        
-        dpg.add_spacer(width=10)
-        
-        zoom_btn = dpg.add_button(label="Zoom Chart", callback=callbacks.zoom_chart_callback)
-        dpg.bind_item_theme(zoom_btn, "export_button_theme")
+# ============================================================================
+#                            MAIN WINDOW
+# ============================================================================
 
-    dpg.add_separator()
-    dpg.add_spacer(height=5)
+class MainWindow(QMainWindow):
+    # main application window
     
-    with dpg.child_window(border=False, horizontal_scrollbar=True):
-        with dpg.group(tag="chart_image_group"):
-            dpg.add_text("Run forecast to see chart.", color=(150, 150, 150))
+    def __init__(self):
+        # initialize main window
+        super().__init__()
         
-        with dpg.group(tag="summary_container", show=False):
-            dpg.add_spacer(height=10)
-            dpg.add_separator()
-            dpg.add_text("SKU SUMMARY", color=GUIConfig.HEADER_COLOR)
-            with dpg.group(tag="summary_image_group"):
-                pass
+        self._session = SessionModel()
+        self._memory_manager = MemoryManager()
+        self._file_handler = FileHandler()
+        
+        self._setup_window()
+        self._setup_menu()
+        self._setup_toolbar()
+        self._setup_tabs()
+        self._setup_statusbar()
+        self._connect_signals()
+        
+        # start memory monitor timer
+        self._start_memory_monitor()
+        
+        # show welcome dialog after window is visible
+        QTimer.singleShot(100, self._show_welcome_dialog)
+    
+    # ---------- WINDOW SETUP ----------
+    
+    def _setup_window(self) -> None:
+        # setup main window properties
+        self.setWindowTitle(f"{config.APP_NAME} v{config.APP_VERSION}")
+        self.setMinimumSize(config.WINDOW_MIN_WIDTH, config.WINDOW_MIN_HEIGHT)
+        self.resize(config.WINDOW_DEFAULT_WIDTH, config.WINDOW_DEFAULT_HEIGHT)
+        
+        # center window on screen
+        screen = self.screen().geometry()
+        x = (screen.width() - self.width()) // 2
+        y = (screen.height() - self.height()) // 2
+        self.move(x, y)
+    
+    # ---------- MENU SETUP ----------
+    
+    def _setup_menu(self) -> None:
+        # setup menu bar and menus
+        menubar = self.menuBar()
+        
+        # file menu setup
+        file_menu = menubar.addMenu("&File")
+        
+        open_action = QAction("&Open Data...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self._on_open_file)
+        file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        # session submenu
+        session_menu = file_menu.addMenu("&Session")
+        
+        save_session_action = QAction("&Save Session...", self)
+        save_session_action.setShortcut(QKeySequence.Save)
+        save_session_action.triggered.connect(self._on_save_session)
+        session_menu.addAction(save_session_action)
+        
+        load_session_action = QAction("&Load Session...", self)
+        load_session_action.setShortcut("Ctrl+Shift+O")
+        load_session_action.triggered.connect(self._on_load_session)
+        session_menu.addAction(load_session_action)
+        
+        file_menu.addSeparator()
+        
+        export_menu = file_menu.addMenu("&Export")
+        
+        export_csv_action = QAction("Export to &CSV", self)
+        export_csv_action.triggered.connect(self._on_export_csv)
+        export_menu.addAction(export_csv_action)
+        
+        export_excel_action = QAction("Export to &Excel", self)
+        export_excel_action.triggered.connect(self._on_export_excel)
+        export_menu.addAction(export_excel_action)
+        
+        export_ppt_action = QAction("Export to &PowerPoint", self)
+        export_ppt_action.triggered.connect(self._on_export_ppt)
+        export_menu.addAction(export_ppt_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut(QKeySequence.Quit)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # edit menu setup
+        edit_menu = menubar.addMenu("&Edit")
+        
+        reset_action = QAction("&Reset Session", self)
+        reset_action.triggered.connect(self._on_reset_session)
+        edit_menu.addAction(reset_action)
+        
+        # view menu setup
+        view_menu = menubar.addMenu("&View")
+        
+        for i, name in config.TAB_NAMES.items():
+            action = QAction(f"&{i+1}. {name}", self)
+            action.setShortcut(f"Ctrl+{i+1}")
+            action.setData(i)
+            action.triggered.connect(self._on_switch_tab)
+            view_menu.addAction(action)
+        
+        # help menu setup
+        help_menu = menubar.addMenu("&Help")
+        
+        # data cleaning help item
+        data_help_action = QAction("&Learn", self)
+        data_help_action.setShortcut("F1")
+        data_help_action.triggered.connect(self._show_data_help)
+        help_menu.addAction(data_help_action)
+        
+        help_menu.addSeparator()
 
-
-def _create_dashboard_tab_content():
-    """
-    create content for dashboard tab
-    """
-    dpg.add_spacer(height=5)
+        welcome_action = QAction("&Welcome", self)
+        welcome_action.triggered.connect(self._show_welcome_dialog)
+        help_menu.addAction(welcome_action)
+        
+        about_action = QAction("&About", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
     
-    # ---------- CONTROLS ----------
-    with dpg.group(horizontal=True):
-        dpg.add_text("Grouping:")
-        dpg.add_combo(DataConfig.GROUP_OPTIONS, default_value="Daily",
-                      tag="dashboard_grouping_combo", width=90,
-                      callback=callbacks.grouping_changed_callback)
-        
-        dpg.add_spacer(width=10)
-        
-        dpg.add_text("SKU:")
-        dpg.add_combo(["All SKUs"], default_value="All SKUs",
-                      tag="dashboard_sku_combo", width=120,
-                      callback=callbacks.dashboard_sku_changed_callback)
-        
-        dpg.add_spacer(width=10)
-        
-        refresh_btn = dpg.add_button(label="Refresh", 
-                                     callback=callbacks.update_dashboard_callback,
-                                     width=70)
-        dpg.bind_item_theme(refresh_btn, "refresh_chart_theme")
-        
-        dpg.add_spacer(width=10)
-        
-        seasonality_btn = dpg.add_button(label="Seasonality", 
-                                         callback=callbacks.show_seasonality_chart_callback,
-                                         width=80)
-        dpg.bind_item_theme(seasonality_btn, "summary_chart_theme")
-        
-        dpg.add_spacer(width=10)
-        
-        diagnostics_btn = dpg.add_button(label="SKU Report", 
-                                         callback=callbacks.show_forecast_diagnostics_callback,
-                                         width=80)
-        dpg.bind_item_theme(diagnostics_btn, "export_button_theme")
+    # ---------- TOOLBAR SETUP ----------
     
-    # ---------- STATISTICS ----------
-    dpg.add_text("STATISTICS", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    dpg.add_spacer(height=5)
-    
-    with dpg.group(horizontal=True):
-        with dpg.child_window(width=180, height=50, border=False):
-            dpg.add_text("Total Forecast", color=(180, 180, 180))
-            stat1 = dpg.add_text("--", tag="stat_total_forecast", wrap=170)
-            if dpg.does_item_exist("stat_font"):
-                dpg.bind_item_font(stat1, "stat_font")
+    def _setup_toolbar(self) -> None:
+        # setup toolbar and workflow indicators
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+        
+        # workflow step indicators
+        self._step_labels = []
+        
+        steps = [
+            ("1", "Data Health"),
+            ("2", "Patterns"),
+            ("3", "Features"),
+            ("4", "Forecast")
+        ]
+        
+        for i, (num, name) in enumerate(steps):
+            # step container widget
+            step_widget = QWidget()
+            step_layout = QHBoxLayout(step_widget)
+            step_layout.setContentsMargins(10, 2, 10, 2)
+            step_layout.setSpacing(5)
             
-        with dpg.child_window(width=180, height=50, border=False):
-            dpg.add_text("Avg Daily", color=(180, 180, 180))
-            stat2 = dpg.add_text("--", tag="stat_avg_daily", wrap=170)
-            dpg.bind_item_font(stat2, "stat_font")
+            # step number label
+            num_label = QLabel(num)
+            num_label.setFixedSize(24, 24)
+            num_label.setAlignment(Qt.AlignCenter)
+            num_label.setStyleSheet("""
+                QLabel {
+                    background-color: #ddd;
+                    color: #666;
+                    border-radius: 12px;
+                    font-weight: bold;
+                }
+            """)
+            step_layout.addWidget(num_label)
             
-        with dpg.child_window(width=120, height=50, border=False):
-            dpg.add_text("Periods", color=(180, 180, 180))
-            stat3 = dpg.add_text("--", tag="stat_num_periods")
-            dpg.bind_item_font(stat3, "stat_font")
-        
-        with dpg.child_window(width=120, height=50, border=False):
-            dpg.add_text("SKUs", color=(180, 180, 180))
-            stat4 = dpg.add_text("--", tag="stat_num_skus")
-            dpg.bind_item_font(stat4, "stat_font")
-    
-    dpg.add_spacer(height=5)
-    
-    with dpg.group(horizontal=True):
-        with dpg.child_window(width=220, height=50, border=False):
-            dpg.add_text("Date Range", color=(180, 180, 180))
-            dpg.add_text("--", tag="stat_date_range", wrap=210)
-        
-        with dpg.child_window(width=200, height=50, border=False):
-            dpg.add_text("95% Confidence", color=(180, 180, 180))
-            dpg.add_text("--", tag="stat_confidence", wrap=190)
-        
-        with dpg.child_window(width=180, height=50, border=False):
-            dpg.add_text("Avg Error", color=(180, 180, 180))
-            stat5 = dpg.add_text("--", tag="stat_error_pct", wrap=170)
-            dpg.bind_item_font(stat5, "stat_font")
-    
-    dpg.add_spacer(height=10)
-    
-    # ---------- SEASONALITY CHART CONTAINER ----------
-    with dpg.group(tag="seasonality_chart_container", show=False):
-        dpg.add_text("SEASONALITY PATTERN", color=GUIConfig.HEADER_COLOR)
-        dpg.add_separator()
-        with dpg.group(tag="seasonality_chart_group"):
-            pass
-        dpg.add_button(label="Hide", callback=callbacks.hide_seasonality_chart, width=60)
-        dpg.add_spacer(height=10)
-    
-    # ---------- FORECAST TABLE ----------
-    dpg.add_text("FORECAST BY PERIOD", color=GUIConfig.HEADER_COLOR)
-    dpg.add_separator()
-    dpg.add_spacer(height=5)
-    
-    with dpg.group(tag="dashboard_table_group"):
-        dpg.add_text("Run forecast to see data.", color=(150, 150, 150))
-
-
-# ================ MAIN GUI FUNCTION ================
-
-def create_gui():
-    """
-    build and run dear pygui interface
-    """
-    dpg.create_context()
-    
-    create_all_themes()
-    create_column_mapping_dialog()
-    
-    # ---------- FILE DIALOG ----------
-    with dpg.file_dialog(show=False, callback=callbacks.load_file_callback, 
-                         cancel_callback=callbacks.cancel_load_callback, 
-                         tag="file_dialog", width=700, height=400):
-        dpg.add_file_extension(".csv", color=(100, 255, 100, 255), custom_text="[CSV]")
-        dpg.add_file_extension(".xlsx", color=(100, 200, 255, 255), custom_text="[Excel]")
-        dpg.add_file_extension(".xls", color=(100, 200, 255, 255), custom_text="[Excel]")
-        dpg.add_file_extension(".*", color=(150, 150, 150, 255))
-    
-    # ---------- FOLDER DIALOG ----------
-    with dpg.file_dialog(show=False, callback=callbacks.folder_selected_callback,
-                         cancel_callback=callbacks.folder_cancel_callback,
-                         tag="folder_dialog", width=700, height=400,
-                         directory_selector=True):
-        pass
-    
-    # ---------- MODEL FILE DIALOG ----------
-    with dpg.file_dialog(show=False, callback=callbacks.load_model_file_callback,
-                         cancel_callback=callbacks.cancel_load_callback,
-                         tag="model_file_dialog", width=700, height=400):
-        dpg.add_file_extension(".pkl", color=(100, 255, 100, 255), custom_text="[Model]")
-        dpg.add_file_extension(".*", color=(150, 150, 150, 255))
-    
-    # ---------- MAIN WINDOW ----------
-    with dpg.window(label="Inventory Forecast", tag="main_window"):
-        
-        # ---------- MENU BAR ----------
-        with dpg.menu_bar():
-            with dpg.menu(label="File"):
-                dpg.add_menu_item(label="Upload CSV/Excel", callback=callbacks.upload_callback)
-                dpg.add_menu_item(label="Load Model", callback=callbacks.load_model_callback)
-                dpg.add_separator()
-                dpg.add_menu_item(label="Set Export Directory", callback=callbacks.select_export_dir_callback)
-                dpg.add_menu_item(label="Export Results", callback=callbacks.export_callback)
-                dpg.add_menu_item(label="Export Model", callback=callbacks.export_model_callback)
-                dpg.add_separator()
-                dpg.add_menu_item(label="Exit", callback=lambda: dpg.stop_dearpygui())
+            # step name label
+            name_label = QLabel(name)
+            name_label.setStyleSheet("color: #666;")
+            step_layout.addWidget(name_label)
             
-            with dpg.menu(label="View"):
-                dpg.add_menu_item(label="Zoom Chart", callback=callbacks.zoom_chart_callback)
-                dpg.add_menu_item(label="Toggle Summary", callback=callbacks.toggle_summary_callback)
-                dpg.add_menu_item(label="Seasonality Chart", callback=callbacks.show_seasonality_chart_callback)
-                dpg.add_menu_item(label="Refresh Dashboard", callback=callbacks.update_dashboard_callback)
-                dpg.add_separator()
-                dpg.add_menu_item(label="SKU Diagnostics", callback=callbacks.show_forecast_diagnostics_callback)
+            self._step_labels.append((num_label, name_label))
+            
+            toolbar.addWidget(step_widget)
+            
+            # add arrow between steps
+            if i < len(steps) - 1:
+                arrow = QLabel("→")
+                arrow.setStyleSheet("color: #ccc; font-size: 16px;")
+                toolbar.addWidget(arrow)
         
-        # ---------- MAIN LAYOUT ----------
-        with dpg.group(horizontal=True):
+        toolbar.addSeparator()
+        
+        # spacer widget
+        spacer = QWidget()
+        spacer.setMinimumWidth(50)
+        toolbar.addWidget(spacer)
+        
+        # session info label
+        self._session_info_label = QLabel("No data loaded")
+        self._session_info_label.setStyleSheet("color: gray;")
+        toolbar.addWidget(self._session_info_label)
+    
+    # ---------- TABS SETUP ----------
+    
+    def _setup_tabs(self) -> None:
+        # setup main tab widget
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+        
+        # create tab instances
+        self._data_tab = DataTab(self._session)
+        self._explore_tab = ExploreTab(self._session)
+        self._features_tab = FeaturesTab(self._session)
+        self._forecast_tab = ForecastTab(self._session)
+        
+        # add tabs to widget
+        self._tabs.addTab(self._data_tab, "1. Data Health")
+        self._tabs.addTab(self._explore_tab, "2. Pattern Discovery")
+        self._tabs.addTab(self._features_tab, "3. Feature Engineering")
+        self._tabs.addTab(self._forecast_tab, "4. Forecast Factory")
+        
+        # disable tabs until data is ready
+        for i in range(1, 4):
+            self._tabs.setTabEnabled(i, False)
+        
+        self.setCentralWidget(self._tabs)
+    
+    # ---------- STATUS BAR SETUP ----------
+    
+    def _setup_statusbar(self) -> None:
+        # setup status bar widgets
+        self._statusbar = QStatusBar()
+        self.setStatusBar(self._statusbar)
+        
+        # status message label
+        self._status_message = QLabel("Ready")
+        self._statusbar.addWidget(self._status_message, stretch=1)
+        
+        # memory indicator
+        self._memory_label = QLabel("Memory: --")
+        self._memory_label.setStyleSheet("color: gray;")
+        self._statusbar.addPermanentWidget(self._memory_label)
+        
+        # progress bar
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMaximumWidth(150)
+        self._progress_bar.setVisible(False)
+        self._statusbar.addPermanentWidget(self._progress_bar)
+    
+    # ---------- SIGNAL CONNECTIONS ----------
+    
+    def _connect_signals(self) -> None:
+        # connect signals between tabs and session
+        
+        # data tab signals
+        self._data_tab.data_loaded.connect(self._on_data_loaded)
+        self._data_tab.data_processed.connect(self._on_data_processed)
+        self._data_tab.proceed_requested.connect(lambda: self._switch_to_tab(1))
+        
+        # explore tab signals
+        self._explore_tab.clusters_created.connect(self._on_clusters_created)
+        self._explore_tab.proceed_requested.connect(lambda: self._switch_to_tab(2))
+        self._explore_tab.navigate_to_data.connect(self._on_navigate_to_data)
+        
+        # features tab signals
+        self._features_tab.features_created.connect(self._on_features_created)
+        self._features_tab.proceed_requested.connect(lambda: self._switch_to_tab(3))
+        
+        # forecast tab signals
+        self._forecast_tab.forecasts_generated.connect(self._on_forecasts_generated)
+        
+        # session signals
+        self._session.state_changed.connect(self._on_session_changed)
+    
+    # ---------- WELCOME DIALOG ----------
+    
+    def _show_welcome_dialog(self) -> None:
+        # show welcome dialog
+        dialog = WelcomeDialog(self)
+        dialog.exec_()
+    
+    # ---------- DATA HELP DIALOG ----------
+    
+    def _show_data_help(self) -> None:
+        # show data cleaning help dialog
+        dialog = DataCleaningHelpDialog(self)
+        dialog.exec_()
+    
+    # ---------- MEMORY MONITORING ----------
+    
+    def _start_memory_monitor(self) -> None:
+        # start memory monitoring timer
+        self._memory_timer = QTimer(self)
+        self._memory_timer.timeout.connect(self._update_memory_display)
+        self._memory_timer.start(5000)
+    
+    def _update_memory_display(self) -> None:
+        # update memory usage display
+        info = self._memory_manager.get_memory_info()
+        
+        rss = info.get("rss_mb", 0)
+        pct = info.get("percent", 0)
+        
+        self._memory_label.setText(f"Memory: {rss:.0f} MB ({pct:.1f}%)")
+        
+        # change color based on usage
+        if pct > 80:
+            self._memory_label.setStyleSheet("color: red;")
+        elif pct > 60:
+            self._memory_label.setStyleSheet("color: orange;")
+        else:
+            self._memory_label.setStyleSheet("color: gray;")
+    
+    # ---------- EVENT HANDLERS ----------
+    
+    def _on_tab_changed(self, index: int) -> None:
+        # handle tab change event
+        self._update_step_indicators(index)
+    
+    def _on_data_loaded(self, summary: dict) -> None:
+        # handle data loaded event
+        self._update_session_info()
+        self._set_status("Data loaded successfully")
+    
+    def _on_data_processed(self) -> None:
+        # handle data processed event
+        # enable explore tab
+        self._tabs.setTabEnabled(1, True)
+        
+        # share processor with other tabs
+        processor = self._data_tab.get_processor()
+        self._explore_tab.set_processor(processor)
+        self._features_tab.set_processor(processor)
+        self._forecast_tab.set_processor(processor)
+        
+        self._update_step_indicators(0, completed=True)
+        self._update_session_info()
+        self._set_status("Data processed - ready for pattern discovery")
+    
+    def _on_clusters_created(self, clusters: dict) -> None:
+        # handle clusters created event
+        self._tabs.setTabEnabled(2, True)
+        
+        clustering = self._explore_tab.get_clustering()
+        self._features_tab.set_clustering(clustering)
+        
+        self._update_step_indicators(1, completed=True)
+        self._set_status(f"Created {len(clusters):,} cluster assignments")
+    
+    def _on_features_created(self, features: dict) -> None:
+        # handle features created event
+        self._tabs.setTabEnabled(3, True)
+        
+        self._update_step_indicators(2, completed=True)
+        self._set_status("Features created - ready for forecasting")
+    
+    def _on_forecasts_generated(self, forecasts: dict) -> None:
+        # handle forecasts generated event
+        self._update_step_indicators(3, completed=True)
+        self._set_status(f"Generated forecasts for {len(forecasts):,} items")
+    
+    def _on_session_changed(self, property_name: str) -> None:
+        # handle session state change event
+        self._update_session_info()
+    
+    def _on_navigate_to_data(self, sku: str) -> None:
+        # handle navigation request back to data tab
+        self._data_tab.add_flagged_sku(sku)
+    
+    # ---------- UI UPDATES ----------
+    
+    def _update_step_indicators(self, current_index: int, completed: bool = False) -> None:
+        # update workflow step indicators
+        for i, (num_label, name_label) in enumerate(self._step_labels):
+            if i < current_index or (i == current_index and completed):
+                # completed step style
+                num_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #28A745;
+                        color: white;
+                        border-radius: 12px;
+                        font-weight: bold;
+                    }
+                """)
+                name_label.setStyleSheet("color: #28A745; font-weight: bold;")
+            elif i == current_index:
+                # current step style
+                num_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #2E86AB;
+                        color: white;
+                        border-radius: 12px;
+                        font-weight: bold;
+                    }
+                """)
+                name_label.setStyleSheet("color: #2E86AB; font-weight: bold;")
+            else:
+                # future step style
+                num_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #ddd;
+                        color: #666;
+                        border-radius: 12px;
+                        font-weight: bold;
+                    }
+                """)
+                name_label.setStyleSheet("color: #666;")
+    
+    def _update_session_info(self) -> None:
+        # update session info label text
+        state = self._session.state
+        
+        if not state.file_loaded:
+            self._session_info_label.setText("No data loaded")
+            return
+        
+        parts = []
+        
+        if state.total_skus > 0:
+            parts.append(f"{state.total_skus:,} items")
+        
+        if state.total_rows > 0:
+            parts.append(f"{state.total_rows:,} rows")
+        
+        if state.data_quality_score > 0:
+            parts.append(f"Quality: {state.data_quality_score:.0f}%")
+        
+        self._session_info_label.setText(" | ".join(parts))
+        self._session_info_label.setStyleSheet("color: #333;")
+    
+    def _set_status(self, message: str) -> None:
+        # set status bar message
+        self._status_message.setText(message)
+    
+    def _switch_to_tab(self, index: int) -> None:
+        # switch to specific tab if enabled
+        if self._tabs.isTabEnabled(index):
+            self._tabs.setCurrentIndex(index)
+    
+    # ---------- SESSION SAVE/LOAD ----------
+    
+    def _on_save_session(self) -> None:
+        # save current session to file
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Session",
+            "stocksight_session.sss",
+            "StockSight Session (*.sss);;All Files (*)"
+        )
+        
+        if path:
+            session_data = self._session.get_export_data()
+            session_data["processed_data"] = self._session.get_data()
+            session_data["features"] = self._session.get_features()
             
-            # ---------- LEFT PANEL ----------
-            with dpg.child_window(width=GUIConfig.LEFT_PANEL_WIDTH, height=-30):
-                with dpg.tab_bar():
-                    with dpg.tab(label="Controls"):
-                        _create_controls_tab_content()
-                    with dpg.tab(label="Scenarios"):
-                        _create_scenarios_tab_content()
+            success, message = self._file_handler.save_session(session_data, path)
             
-            # ---------- RIGHT PANEL ----------
-            with dpg.child_window(width=-1, height=-30):
-                with dpg.tab_bar():
-                    with dpg.tab(label="Data Preview"):
-                        with dpg.child_window(border=False, horizontal_scrollbar=True):
-                            dpg.add_group(tag="preview_group")
-                            dpg.add_text("Load a CSV or Excel file to see data preview.", parent="preview_group")
+            if success:
+                QMessageBox.information(self, "Session Saved", f"Session saved to:\n{path}")
+            else:
+                QMessageBox.warning(self, "Save Failed", f"Failed to save session:\n{message}")
+    
+    def _on_load_session(self) -> None:
+        # load session from file
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Session",
+            "",
+            "StockSight Session (*.sss);;All Files (*)"
+        )
+        
+        if path:
+            session_data, message = self._file_handler.load_session(path)
+            
+            if session_data:
+                # confirm overwrite
+                if self._session.state.file_loaded:
+                    reply = QMessageBox.question(
+                        self,
+                        "Load Session",
+                        "Loading a session will replace your current work.\nContinue?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
                     
-                    with dpg.tab(label="Forecast Chart"):
-                        with dpg.group(tag="chart_group"):
-                            _create_chart_tab_content()
-                    
-                    with dpg.tab(label="Dashboard"):
-                        with dpg.child_window(border=False):
-                            _create_dashboard_tab_content()
+                    if reply == QMessageBox.No:
+                        return
+                
+                # reset state and restore
+                self._session.reset()
+                
+                # restore data and mappings
+                self._session.set_data(session_data.get("processed_data"))
+                self._session.set_column_mapping(session_data.get("column_mapping", {}))
+                self._session.set_clusters(session_data.get("clusters", {}))
+                self._session.set_features(session_data.get("features", {}))
+                self._session.set_forecasts(session_data.get("forecasts", {}))
+                self._session.set_anomalies(session_data.get("anomalies", {}))
+                
+                # restore bookmarks
+                for bookmark in session_data.get("bookmarks", []):
+                    self._session.add_bookmark(bookmark.get("sku"), bookmark.get("note", ""))
+                
+                # restore summary values
+                summary = session_data.get("session_summary", {})
+                self._session.update_state(
+                    file_path=summary.get("file", ""),
+                    total_rows=summary.get("rows", 0),
+                    total_skus=summary.get("skus", 0),
+                    total_categories=summary.get("categories", 0),
+                    data_quality_score=summary.get("quality_score", 0)
+                )
+                
+                # update data tab processor
+                processor = self._data_tab.get_processor()
+                processor.processed_data = session_data.get("processed_data")
+                processor.set_column_mapping(session_data.get("column_mapping", {}))
+                
+                if processor.processed_data is not None and processor.get_mapped_column("sku"):
+                    sku_col = processor.get_mapped_column("sku")
+                    processor.sku_list = processor.processed_data[sku_col].unique().tolist()
+                
+                # refresh data tab ui
+                if processor.column_mapping:
+                    self._data_tab._update_mapping_display(processor.column_mapping)
+                self._data_tab._calculate_quality()
+                self._data_tab._classify_skus()
+                if processor.processed_data is not None:
+                    self._data_tab._data_table.set_data(processor.processed_data.head(1000))
+                
+                # restore explore tab
+                self._tabs.setTabEnabled(1, True)
+                self._explore_tab.set_processor(processor)
+                clusters = session_data.get("clusters", {})
+                clustering = self._explore_tab.get_clustering()
+                clustering.sku_clusters = clusters
+                clustering._calculate_cluster_summary()
+                self._explore_tab._navigator.set_clusters(clusters)
+                self._explore_tab._heatmap.set_cluster_matrix(clustering.cluster_summary)
+                summary_list = clustering.get_cluster_summary()
+                self._explore_tab._cluster_summary_label.setText(
+                    self._explore_tab._format_cluster_summary(summary_list)
+                )
+                
+                # restore features tab
+                self._tabs.setTabEnabled(2, True)
+                self._features_tab.set_processor(processor)
+                self._features_tab.set_clustering(clustering)
+                features_data = session_data.get("features", {})
+                if features_data:
+                    self._features_tab._update_importance_display(
+                        features_data.get("importance", {})
+                    )
+                    selected_feats = features_data.get("selected_features", [])
+                    if selected_feats:
+                        self._features_tab._select_features(selected_feats)
+                
+                # restore forecast tab
+                forecasts = session_data.get("forecasts", {})
+                if forecasts:
+                    self._tabs.setTabEnabled(3, True)
+                    self._forecast_tab.set_processor(processor)
+                    self._forecast_tab._results_model.set_forecasts(forecasts)
+                    self._forecast_tab._update_summary()
+                    self._forecast_tab._enable_export(True)
+                
+                # update main window state
+                step = self._session.get_workflow_step()
+                for i in range(1, 4):
+                    self._tabs.setTabEnabled(i, self._session.can_proceed_to_tab(i))
+                
+                self._update_step_indicators(step, completed=(step == 4))
+                self._update_session_info()
+                self._set_status("Session loaded successfully")
+                
+                QMessageBox.information(
+                    self,
+                    "Session Loaded",
+                    "Session loaded successfully.\nYou can continue from where you left off."
+                )
+            else:
+                QMessageBox.warning(self, "Load Failed", f"Failed to load session:\n{message}")
+    
+    # ---------- MENU ACTIONS ----------
+    
+    def _on_open_file(self) -> None:
+        # open file picker and route to data tab
+        self._switch_to_tab(0)
+        self._data_tab._browse_file()
+    
+    def _on_export_csv(self) -> None:
+        # export forecasts to csv
+        self._forecast_tab._export_csv()
+    
+    def _on_export_excel(self) -> None:
+        # export forecasts to excel
+        self._forecast_tab._export_excel()
+    
+    def _on_export_ppt(self) -> None:
+        # export forecasts to powerpoint
+        self._forecast_tab._export_ppt()
+    
+    def _on_reset_session(self) -> None:
+        # reset session state
+        reply = QMessageBox.question(
+            self,
+            "Reset Session",
+            "Are you sure you want to reset the session?\nAll unsaved work will be lost.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
         
-        # ---------- STATUS BAR ----------
-        with dpg.child_window(height=25, no_scrollbar=True):
-            with dpg.group(horizontal=True):
-                dpg.add_text("Ready", tag="status_text")
-                dpg.add_spacer(width=20)
-                dpg.add_text("", tag="data_info_text")
-                dpg.add_spacer(width=20)
-                dpg.add_text("", tag="column_mapping_text", color=(100, 255, 100))
+        if reply == QMessageBox.Yes:
+            self._session.reset()
+            
+            # disable non-data tabs
+            for i in range(1, 4):
+                self._tabs.setTabEnabled(i, False)
+            
+            self._tabs.setCurrentIndex(0)
+            self._update_step_indicators(0)
+            self._update_session_info()
+            self._set_status("Session reset")
     
-    # ---------- VIEWPORT SETUP ----------
-    dpg.create_viewport(title=GUIConfig.WINDOW_TITLE, 
-                        width=GUIConfig.WINDOW_WIDTH, 
-                        height=GUIConfig.WINDOW_HEIGHT)
-    dpg.setup_dearpygui()
-    dpg.show_viewport()
-    dpg.set_primary_window("main_window", True)
+    def _on_switch_tab(self) -> None:
+        # handle tab switch from menu action
+        action = self.sender()
+        index = action.data()
+        self._switch_to_tab(index)
     
-    dpg.start_dearpygui()
+    def _show_about(self) -> None:
+        # show about dialog
+        dialog = AboutDialog(self)
+        dialog.exec_()
     
-    dpg.destroy_context()
+    # ---------- WINDOW EVENTS ----------
+    
+    def closeEvent(self, event) -> None:
+        # handle window close event
+        if self._session.state.forecasts_generated:
+            reply = QMessageBox.question(
+                self,
+                "Exit Application",
+                "You have generated forecasts.\nDo you want to exit without exporting?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
+        
+        # run memory cleanup
+        self._memory_manager.force_cleanup()
+        
+        event.accept()
