@@ -40,25 +40,45 @@ class ExportFormatter:
     def format_forecast_csv(self, 
                             forecasts: Dict[str, Any],
                             include_bounds: bool = True) -> pd.DataFrame:
-        # format forecasts for csv export
+        # format forecasts for csv export - includes all forecast values
         rows = []
         
         for sku, result in forecasts.items():
             for i, (date, value) in enumerate(zip(result.dates, result.forecast)):
+                # format date - remove timestamp
+                date_str = self._format_date_no_timestamp(date)
+                
                 row = {
                     "sku": sku,
-                    "date": date,
+                    "date": date_str,
                     "forecast": value,
                     "model": result.model
                 }
                 
                 if include_bounds:
-                    row["lower_bound"] = result.lower_bound[i]
-                    row["upper_bound"] = result.upper_bound[i]
+                    row["lower_bound"] = result.lower_bound[i] if result.lower_bound else None
+                    row["upper_bound"] = result.upper_bound[i] if result.upper_bound else None
                 
                 rows.append(row)
         
         return pd.DataFrame(rows)
+    
+    def _format_date_no_timestamp(self, date) -> str:
+        # format date without timestamp
+        if date is None:
+            return ""
+        
+        date_str = str(date)
+        
+        # remove timestamp portion if present
+        if " " in date_str:
+            date_str = date_str.split(" ")[0]
+        
+        # also handle T separator
+        if "T" in date_str:
+            date_str = date_str.split("T")[0]
+        
+        return date_str
     
     # ---------- EXCEL EXPORT ----------
     
@@ -83,6 +103,9 @@ class ExportFormatter:
                 percent_format = workbook.add_format({"num_format": "0.0%"})
                 
                 for sheet_name, df in data.items():
+                    # format date columns to remove timestamp
+                    df = self._remove_timestamps_from_df(df)
+                    
                     df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
                     
                     if format_tables:
@@ -104,6 +127,16 @@ class ExportFormatter:
         except Exception as e:
             return False, str(e)
     
+    def _remove_timestamps_from_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        # remove timestamps from date columns in dataframe
+        result = df.copy()
+        
+        for col in result.columns:
+            if "date" in col.lower():
+                result[col] = result[col].apply(self._format_date_no_timestamp)
+        
+        return result
+    
     def create_forecast_workbook(self,
                                  forecasts: Dict[str, Any],
                                  summary: pd.DataFrame,
@@ -116,6 +149,26 @@ class ExportFormatter:
         }
         
         return self.export_excel(sheets, file_path)
+    
+    def export_comparison_report(self, comparison_results: Dict, file_path: str) -> tuple:
+        # export model comparison results to excel
+        try:
+            stats = comparison_results.get("model_stats", {})
+            rows = []
+            
+            for model, metrics in stats.items():
+                rows.append({
+                    "Model": model,
+                    "Avg MAPE": metrics.get("avg_mape", 0),
+                    "Avg MAE": metrics.get("avg_mae", 0),
+                    "Win Rate": metrics.get("win_rate", 0)
+                })
+            
+            df = pd.DataFrame(rows)
+            
+            return self.export_excel({"Model Comparison": df}, file_path)
+        except Exception as e:
+            return False, str(e)
     
     def _create_model_performance_df(self, forecasts: Dict[str, Any]) -> pd.DataFrame:
         # create model performance summary
@@ -196,7 +249,7 @@ class ExportFormatter:
         title_para.font.bold = True
         title_para.alignment = 1  # center
         
-        # subtitle with date
+        # subtitle with date - no timestamp
         subtitle_box = slide.shapes.add_textbox(Inches(0.5), Inches(3.5), Inches(12), Inches(0.5))
         subtitle_frame = subtitle_box.text_frame
         subtitle_para = subtitle_frame.paragraphs[0]
@@ -368,10 +421,11 @@ class ExportFormatter:
             c.setFont("Helvetica-Bold", 24)
             c.drawString(1 * inch, height - 1 * inch, "Demand Forecast Report")
             
-            # date
+            # date - no timestamp
             c.setFont("Helvetica", 12)
             c.drawString(1 * inch, height - 1.4 * inch, 
-                        f"Generated: {datetime.now().strftime('%B %d, %Y')}")
+                        f"Generated: {datetime.now().strftime('%B %d, %Y')}"
+            )
             
             # horizontal line
             c.setStrokeColor(colors.grey)
@@ -425,10 +479,10 @@ class ExportFormatter:
     # ---------- HELPER METHODS ----------
     
     def get_export_filename(self, base_name: str, format_type: str) -> str:
-        # generate export filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # generate export filename with date only (no timestamp)
+        date_str = datetime.now().strftime("%Y%m%d")
         extension = self.export_config.get(format_type, {}).get("extension", ".csv")
-        return f"{base_name}_{timestamp}{extension}"
+        return f"{base_name}_{date_str}{extension}"
     
     def prepare_export_data(self,
                             forecasts: Dict[str, Any],
@@ -437,18 +491,21 @@ class ExportFormatter:
         # prepare all export data sheets
         sheets = {}
         
-        # forecasts sheet
+        # forecasts sheet - includes all forecast values
         forecast_rows = []
         for sku, result in forecasts.items():
             for i, date in enumerate(result.dates):
+                # format date without timestamp
+                date_str = self._format_date_no_timestamp(date)
+                
                 row = {
                     "sku": sku,
-                    "date": date,
+                    "date": date_str,
                     "forecast": result.forecast[i]
                 }
                 if include_bounds:
-                    row["lower_bound"] = result.lower_bound[i]
-                    row["upper_bound"] = result.upper_bound[i]
+                    row["lower_bound"] = result.lower_bound[i] if result.lower_bound else None
+                    row["upper_bound"] = result.upper_bound[i] if result.upper_bound else None
                 forecast_rows.append(row)
         
         sheets["Forecasts"] = pd.DataFrame(forecast_rows)

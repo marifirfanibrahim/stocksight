@@ -49,6 +49,7 @@ class ForecastSettingsDialog(QDialog):
         self.setWindowTitle("Forecast Settings")
         self.setMinimumWidth(580)
         self.setMinimumHeight(580)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -76,7 +77,6 @@ class ForecastSettingsDialog(QDialog):
         self._estimate_label = QLabel("")
         self._estimate_label.setStyleSheet("padding: 10px; border-radius: 5px;")
         self._estimate_label.setWordWrap(True)
-        self._estimate_label.setToolTip("Estimated time to complete based on item count and selected strategy")
         layout.addWidget(self._estimate_label)
         
         layout.addStretch()
@@ -91,7 +91,6 @@ class ForecastSettingsDialog(QDialog):
         
         start_btn = QPushButton("Start Forecasting")
         start_btn.setDefault(True)
-        start_btn.setToolTip("Begin the forecasting process with selected settings")
         start_btn.clicked.connect(self._on_start)
         button_layout.addWidget(start_btn)
         
@@ -103,7 +102,6 @@ class ForecastSettingsDialog(QDialog):
     def _create_strategy_group(self) -> QGroupBox:
         # create strategy selection group
         group = QGroupBox("Forecasting Strategy")
-        group.setToolTip("Select the balance between speed and accuracy")
         layout = QVBoxLayout(group)
         
         self._strategy_group = QButtonGroup(self)
@@ -114,7 +112,6 @@ class ForecastSettingsDialog(QDialog):
             # strategy container
             container = QFrame()
             container.setFrameStyle(QFrame.StyledPanel)
-            container.setToolTip(f"{info['name']}: {info['description']}")
             container_layout = QVBoxLayout(container)
             container_layout.setSpacing(5)
             
@@ -147,7 +144,6 @@ class ForecastSettingsDialog(QDialog):
     def _create_frequency_group(self) -> QGroupBox:
         # create frequency and horizon group
         group = QGroupBox("Forecast Frequency & Horizon")
-        group.setToolTip("Define the time periods for your forecast")
         layout = QVBoxLayout(group)
         
         # frequency selector
@@ -160,7 +156,6 @@ class ForecastSettingsDialog(QDialog):
             "Weekly (week totals)",
             "Monthly (month totals)"
         ])
-        self._frequency_combo.setToolTip("The time interval for each forecast point")
         self._frequency_combo.currentIndexChanged.connect(self._on_frequency_changed)
         freq_layout.addWidget(self._frequency_combo)
         
@@ -175,7 +170,6 @@ class ForecastSettingsDialog(QDialog):
         self._horizon_spin.setRange(7, 365)
         self._horizon_spin.setValue(30)
         self._horizon_spin.setSuffix(" days")
-        self._horizon_spin.setToolTip("Number of days into the future to predict")
         self._horizon_spin.valueChanged.connect(self._update_estimate)
         horizon_layout.addWidget(self._horizon_spin)
         
@@ -186,7 +180,6 @@ class ForecastSettingsDialog(QDialog):
             btn = QPushButton(label)
             btn.setMaximumWidth(45)
             btn.setProperty("days", days)
-            btn.setToolTip(f"Set horizon to {days} days")
             btn.clicked.connect(self._set_horizon_from_button)
             horizon_layout.addWidget(btn)
         
@@ -209,29 +202,22 @@ class ForecastSettingsDialog(QDialog):
         # tier-based processing
         self._tier_processing = QCheckBox("Use tier-based processing")
         self._tier_processing.setChecked(True)
-        self._tier_processing.setToolTip(
-            "Recommended: Applies different models based on item volume.\n"
-            "A-items get sophisticated models, C-items get simple baselines."
-        )
         self._tier_processing.stateChanged.connect(self._update_estimate)
         layout.addWidget(self._tier_processing)
         
         # include confidence intervals
         self._include_intervals = QCheckBox("Include confidence intervals")
         self._include_intervals.setChecked(True)
-        self._include_intervals.setToolTip("Calculate upper and lower bounds for forecasts (range of likely values)")
         layout.addWidget(self._include_intervals)
         
         # generate comparison
         self._model_comparison = QCheckBox("Generate model comparison report")
         self._model_comparison.setChecked(False)
-        self._model_comparison.setToolTip("Run multiple models for each item and report which one performed best (slower)")
         layout.addWidget(self._model_comparison)
         
         # process bookmarked first
         self._bookmarks_first = QCheckBox("Process bookmarked items first")
         self._bookmarks_first.setChecked(False)
-        self._bookmarks_first.setToolTip("Prioritize items you've marked as important so you can see their results sooner")
         layout.addWidget(self._bookmarks_first)
         
         return group

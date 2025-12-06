@@ -57,6 +57,7 @@ class ColumnMappingDialog(QDialog):
         self.setWindowTitle("Map Your Columns")
         self.setMinimumWidth(550)
         self.setMinimumHeight(480)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -91,7 +92,6 @@ class ColumnMappingDialog(QDialog):
         
         # required columns
         required_group = QGroupBox("Required Columns")
-        required_group.setToolTip("These columns are necessary to create a forecast")
         required_layout = QVBoxLayout(required_group)
         required_layout.setSpacing(12)
         
@@ -103,7 +103,6 @@ class ColumnMappingDialog(QDialog):
         
         # optional columns
         optional_group = QGroupBox("Optional Columns (Influence Factors)")
-        optional_group.setToolTip("These columns help improve forecast accuracy")
         optional_layout = QVBoxLayout(optional_group)
         optional_layout.setSpacing(12)
         
@@ -151,7 +150,6 @@ class ColumnMappingDialog(QDialog):
                 background-color: #3A9CC0;
             }}
         """)
-        confirm_btn.setToolTip("Save mapping and process data")
         confirm_btn.clicked.connect(self._on_confirm)
         button_layout.addWidget(confirm_btn)
         
@@ -168,7 +166,6 @@ class ColumnMappingDialog(QDialog):
         label_text = f"{label} *" if required else label
         label_widget = QLabel(label_text)
         label_widget.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        label_widget.setToolTip(hint)
         layout.addWidget(label_widget)
         
         # hint
@@ -186,7 +183,6 @@ class ColumnMappingDialog(QDialog):
         for col in self._columns:
             combo.addItem(col, col)
         combo.setMinimumWidth(200)
-        combo.setToolTip(f"Select the column for '{label}'")
         combo_layout.addWidget(combo)
         
         confidence_label = QLabel("")
@@ -264,7 +260,6 @@ class ColumnMappingDialog(QDialog):
                 
                 confidence_label.setText(text)
                 confidence_label.setStyleSheet(f"color: {color};")
-                confidence_label.setToolTip(f"We are {confidence_pct}% sure this is the right column based on name and data")
     
     # ---------- VALIDATION ----------
     

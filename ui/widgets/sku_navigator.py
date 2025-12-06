@@ -58,7 +58,6 @@ class SKUNavigator(QWidget):
         self._search_box = QLineEdit()
         self._search_box.setPlaceholderText("Search items...")
         self._search_box.setClearButtonEnabled(True)
-        self._search_box.setToolTip("Type to filter items by name or code")
         search_layout.addWidget(self._search_box)
         
         layout.addLayout(search_layout)
@@ -77,22 +76,12 @@ class SKUNavigator(QWidget):
             "By Cluster",
             "Bookmarked"
         ])
-        self._view_combo.setToolTip(
-            "Change how items are grouped:\n"
-            "• All Items: Flat list\n"
-            "• By Category: Group by product category\n"
-            "• By Volume Tier: Group by A/B/C classification\n"
-            "• By Pattern: Group by sales pattern type\n"
-            "• By Cluster: Group by full cluster (tier + pattern)\n"
-            "• Bookmarked: Show only bookmarked items"
-        )
         view_layout.addWidget(self._view_combo)
         
         view_layout.addStretch()
         
         # count label
         self._count_label = QLabel("0 items")
-        self._count_label.setToolTip("Number of items shown")
         view_layout.addWidget(self._count_label)
         
         layout.addLayout(view_layout)
@@ -104,7 +93,6 @@ class SKUNavigator(QWidget):
         self._tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self._tree.header().setStretchLastSection(True)
-        self._tree.setToolTip("Select items to view details - double-click to focus")
         
         # disable editing but allow selection
         self._tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -116,15 +104,12 @@ class SKUNavigator(QWidget):
         
         self._bookmark_btn = QPushButton("★ Bookmark")
         self._bookmark_btn.setEnabled(False)
-        self._bookmark_btn.setToolTip("Add or remove selected items from bookmarks")
         button_layout.addWidget(self._bookmark_btn)
         
         self._select_all_btn = QPushButton("Select All")
-        self._select_all_btn.setToolTip("Select all visible items")
         button_layout.addWidget(self._select_all_btn)
         
         self._clear_btn = QPushButton("Clear")
-        self._clear_btn.setToolTip("Clear current selection")
         button_layout.addWidget(self._clear_btn)
         
         layout.addLayout(button_layout)
@@ -224,7 +209,6 @@ class SKUNavigator(QWidget):
             cat_item = QTreeWidgetItem([cat, f"{len(cat_groups[cat])} items"])
             cat_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "category", "name": cat})
             cat_item.setFlags(cat_item.flags() | Qt.ItemIsAutoTristate)
-            cat_item.setToolTip(0, f"Category: {cat} ({len(cat_groups[cat])} items)")
             
             for sku in cat_groups[cat]:
                 sku_item = self._create_sku_item(sku)
@@ -240,19 +224,12 @@ class SKUNavigator(QWidget):
             tier = self._get_sku_tier(sku)
             tier_groups.get(tier, tier_groups["Unknown"]).append(sku)
         
-        tier_tooltips = {
-            "A": "High-volume items (top 20% by volume)",
-            "B": "Medium-volume items",
-            "C": "Low-volume items (bottom 50%)"
-        }
-        
         for tier in ["A", "B", "C"]:
             if tier_groups[tier]:
                 tier_label = config.CLUSTER_LABELS["volume"].get(tier, tier)
                 tier_item = QTreeWidgetItem([tier_label, f"{len(tier_groups[tier])} items"])
                 tier_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "tier", "name": tier})
                 tier_item.setFlags(tier_item.flags() | Qt.ItemIsAutoTristate)
-                tier_item.setToolTip(0, tier_tooltips.get(tier, ""))
                 
                 for sku in tier_groups[tier]:
                     sku_item = self._create_sku_item(sku)
@@ -268,20 +245,12 @@ class SKUNavigator(QWidget):
             pattern = self._get_sku_pattern(sku)
             pattern_groups.get(pattern, pattern_groups["unknown"]).append(sku)
         
-        pattern_tooltips = {
-            "seasonal": "Strong seasonal patterns (e.g., holiday spikes)",
-            "erratic": "Highly unpredictable demand",
-            "variable": "Moderate variability",
-            "steady": "Consistent, predictable demand"
-        }
-        
         for pattern in ["seasonal", "erratic", "variable", "steady"]:
             if pattern_groups[pattern]:
                 pattern_label = config.CLUSTER_LABELS["pattern"].get(pattern, pattern)
                 pattern_item = QTreeWidgetItem([pattern_label, f"{len(pattern_groups[pattern])} items"])
                 pattern_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "pattern", "name": pattern})
                 pattern_item.setFlags(pattern_item.flags() | Qt.ItemIsAutoTristate)
-                pattern_item.setToolTip(0, pattern_tooltips.get(pattern, ""))
                 
                 for sku in pattern_groups[pattern]:
                     sku_item = self._create_sku_item(sku)
@@ -303,7 +272,6 @@ class SKUNavigator(QWidget):
             cluster_item = QTreeWidgetItem([cluster, f"{len(cluster_groups[cluster])} items"])
             cluster_item.setData(0, Qt.UserRole, {"type": "group", "group_type": "cluster", "name": cluster})
             cluster_item.setFlags(cluster_item.flags() | Qt.ItemIsAutoTristate)
-            cluster_item.setToolTip(0, f"Cluster: {cluster}")
             
             for sku in cluster_groups[cluster]:
                 sku_item = self._create_sku_item(sku)
@@ -320,17 +288,6 @@ class SKUNavigator(QWidget):
         
         # disable editing
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-        
-        # build tooltip
-        tooltip_parts = [f"Item: {sku}"]
-        if sku in self._clusters:
-            cluster = self._clusters[sku]
-            tooltip_parts.append(f"Tier: {cluster.volume_tier}")
-            tooltip_parts.append(f"Pattern: {cluster.pattern_type}")
-            tooltip_parts.append(f"Volume: {cluster.total_volume:,.0f}")
-        if sku in self._bookmarks:
-            tooltip_parts.append("★ Bookmarked")
-        item.setToolTip(0, "\n".join(tooltip_parts))
         
         # mark bookmarked items
         if sku in self._bookmarks:
@@ -455,7 +412,6 @@ class SKUNavigator(QWidget):
             
             # copy action
             copy_action = QAction("Copy Item Name", menu)
-            copy_action.setToolTip("Copy item name to clipboard")
             copy_action.triggered.connect(lambda: self._copy_to_clipboard(sku))
             menu.addAction(copy_action)
             
@@ -464,11 +420,9 @@ class SKUNavigator(QWidget):
             # bookmark action
             if sku in self._bookmarks:
                 bookmark_action = QAction("Remove Bookmark", menu)
-                bookmark_action.setToolTip("Remove this item from bookmarks")
                 bookmark_action.triggered.connect(lambda: self._remove_bookmark_action(sku))
             else:
                 bookmark_action = QAction("Add Bookmark", menu)
-                bookmark_action.setToolTip("Add this item to bookmarks for quick access")
                 bookmark_action.triggered.connect(lambda: self._add_bookmark_action(sku))
             menu.addAction(bookmark_action)
             

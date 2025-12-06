@@ -33,7 +33,7 @@ class SheetSelectionDialog(QDialog):
         super().__init__(parent)
         
         self._file_path = file_path
-        self._sheet_info = sheet_info  # {sheet_name: row_count}
+        self._sheet_info = sheet_info
         self._selected_sheet = None
         self._preview_data = {}
         
@@ -61,7 +61,6 @@ class SheetSelectionDialog(QDialog):
         file_name = self._file_path.split("/")[-1].split("\\")[-1]
         info_label = QLabel(f"📁 {file_name} • {len(self._sheet_info)} worksheet(s)")
         info_label.setStyleSheet("color: #666;")
-        info_label.setToolTip("Excel file being imported")
         layout.addWidget(info_label)
         
         # splitter for sheet list and preview
@@ -69,14 +68,12 @@ class SheetSelectionDialog(QDialog):
         
         # left side - sheet list
         left_widget = QGroupBox("Available Worksheets")
-        left_widget.setToolTip("Click a worksheet to see preview")
         left_layout = QVBoxLayout(left_widget)
         
         self._sheet_list = QListWidget()
         self._sheet_list.setAlternatingRowColors(True)
         self._sheet_list.itemClicked.connect(self._on_sheet_clicked)
         self._sheet_list.itemDoubleClicked.connect(self._on_sheet_double_clicked)
-        self._sheet_list.setToolTip("Double-click to select and continue")
         left_layout.addWidget(self._sheet_list)
         
         # sheet count label
@@ -88,14 +85,12 @@ class SheetSelectionDialog(QDialog):
         
         # right side - preview
         right_widget = QGroupBox("Data Preview")
-        right_widget.setToolTip("First 10 rows of selected worksheet")
         right_layout = QVBoxLayout(right_widget)
         
         self._preview_table = QTableWidget()
         self._preview_table.setAlternatingRowColors(True)
         self._preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._preview_table.horizontalHeader().setStretchLastSection(True)
-        self._preview_table.setToolTip("Preview of worksheet data")
         right_layout.addWidget(self._preview_table)
         
         # preview info
@@ -122,13 +117,11 @@ class SheetSelectionDialog(QDialog):
         button_layout.addStretch()
         
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setToolTip("Cancel import")
         cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(cancel_btn)
         
         self._select_btn = QPushButton("Select Worksheet")
         self._select_btn.setEnabled(False)
-        self._select_btn.setToolTip("Use selected worksheet for import")
         self._select_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {config.UI_COLORS['primary']};
@@ -171,7 +164,6 @@ class SheetSelectionDialog(QDialog):
             
             item.setText(display_text)
             item.setData(Qt.UserRole, sheet_name)
-            item.setToolTip(f"Worksheet: {sheet_name}\nRows: {row_count:,}")
             
             # track largest sheet
             if row_count > largest_count:
@@ -241,7 +233,6 @@ class SheetSelectionDialog(QDialog):
                 for j, value in enumerate(row):
                     cell_text = str(value) if pd.notna(value) else ""
                     item = QTableWidgetItem(cell_text)
-                    item.setToolTip(cell_text)
                     self._preview_table.setItem(i, j, item)
             
             # resize columns

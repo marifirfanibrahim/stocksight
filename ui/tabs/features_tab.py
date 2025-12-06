@@ -57,7 +57,6 @@ class FeaturesTab(QWidget):
         
         header = QLabel("Feature Engineering")
         header.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        header.setToolTip("Create smart features that help predict future demand")
         header_layout.addWidget(header)
         
         header_layout.addStretch()
@@ -73,12 +72,6 @@ class FeaturesTab(QWidget):
             "Basic 5 Features",
             "Custom Selection"
         ])
-        self._feature_set_combo.setToolTip(
-            "Tier-Based: A-items get all features, C-items get basic features\n"
-            "All 20: Maximum features for best accuracy\n"
-            "Top 10: Balanced speed and accuracy\n"
-            "Basic 5: Fastest processing"
-        )
         self._feature_set_combo.currentIndexChanged.connect(self._on_feature_set_changed)
         header_layout.addWidget(self._feature_set_combo)
         
@@ -122,7 +115,6 @@ class FeaturesTab(QWidget):
         # create features button
         self._create_btn = QPushButton("Create Features")
         self._create_btn.setMinimumWidth(150)
-        self._create_btn.setToolTip("Generate selected features for all items - required before forecasting")
         self._create_btn.clicked.connect(self._create_features)
         bottom_layout.addWidget(self._create_btn)
         
@@ -131,7 +123,6 @@ class FeaturesTab(QWidget):
         self._proceed_btn.setEnabled(False)
         self._proceed_btn.setMinimumHeight(40)
         self._proceed_btn.setStyleSheet(f"background-color: {config.UI_COLORS['primary']}; color: white; font-weight: bold;")
-        self._proceed_btn.setToolTip("Continue to generate demand forecasts")
         self._proceed_btn.clicked.connect(self.proceed_requested.emit)
         bottom_layout.addWidget(self._proceed_btn)
         
@@ -140,7 +131,6 @@ class FeaturesTab(QWidget):
     def _create_feature_list_group(self) -> QGroupBox:
         # create feature list group
         group = QGroupBox("Available Features")
-        group.setToolTip("Select which features to create for your forecasting models")
         layout = QVBoxLayout(group)
         
         # description
@@ -163,27 +153,40 @@ class FeaturesTab(QWidget):
         self._feature_table.setAlternatingRowColors(True)
         self._feature_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._feature_table.verticalHeader().setVisible(False)
-        self._feature_table.setToolTip("Check features to include - hover over descriptions for more details")
         
         # populate features
         self._populate_feature_table()
         
         layout.addWidget(self._feature_table)
         
-        # select buttons
+        # select buttons - including impact-based selection
         btn_layout = QHBoxLayout()
         
         select_all_btn = QPushButton("Select All")
-        select_all_btn.setToolTip("Select all available features")
         select_all_btn.clicked.connect(self._select_all_features)
         btn_layout.addWidget(select_all_btn)
         
         select_none_btn = QPushButton("Select None")
-        select_none_btn.setToolTip("Deselect all features")
         select_none_btn.clicked.connect(self._select_no_features)
         btn_layout.addWidget(select_none_btn)
         
         btn_layout.addStretch()
+        
+        # impact-based selection buttons
+        select_high_btn = QPushButton("+ High Impact")
+        select_high_btn.setToolTip("Add all high impact features to selection")
+        select_high_btn.clicked.connect(lambda: self._select_by_impact("High"))
+        btn_layout.addWidget(select_high_btn)
+        
+        select_medium_btn = QPushButton("+ Medium Impact")
+        select_medium_btn.setToolTip("Add all medium impact features to selection")
+        select_medium_btn.clicked.connect(lambda: self._select_by_impact("Medium"))
+        btn_layout.addWidget(select_medium_btn)
+        
+        select_low_btn = QPushButton("+ Low Impact")
+        select_low_btn.setToolTip("Add all low impact features to selection")
+        select_low_btn.clicked.connect(lambda: self._select_by_impact("Low"))
+        btn_layout.addWidget(select_low_btn)
         
         layout.addLayout(btn_layout)
         
@@ -214,29 +217,25 @@ class FeaturesTab(QWidget):
             # feature name
             name_item = QTableWidgetItem(feature.replace("_", " ").title())
             name_item.setData(Qt.UserRole, feature)
-            name_item.setToolTip(f"Feature: {feature}")
             self._feature_table.setItem(i, 1, name_item)
             
             # description
             desc = descriptions.get(feature, "")
             desc_item = QTableWidgetItem(desc)
-            desc_item.setToolTip(desc)
             self._feature_table.setItem(i, 2, desc_item)
             
             # impact indicator
             impact = self._get_feature_impact(feature)
             impact_item = QTableWidgetItem(impact)
             impact_item.setTextAlignment(Qt.AlignCenter)
+            impact_item.setData(Qt.UserRole, impact)
             
             if impact == "High":
                 impact_item.setBackground(QBrush(QColor(200, 230, 200)))
-                impact_item.setToolTip("High impact - strongly recommended")
             elif impact == "Medium":
                 impact_item.setBackground(QBrush(QColor(255, 255, 200)))
-                impact_item.setToolTip("Medium impact - recommended for A/B items")
             else:
                 impact_item.setBackground(QBrush(QColor(240, 240, 240)))
-                impact_item.setToolTip("Lower impact - optional for detailed analysis")
             
             self._feature_table.setItem(i, 3, impact_item)
     
@@ -255,7 +254,6 @@ class FeaturesTab(QWidget):
     def _create_tier_config_group(self) -> QGroupBox:
         # create tier configuration group
         group = QGroupBox("Tier-Based Configuration")
-        group.setToolTip("Different item tiers can use different feature sets for optimal speed/accuracy balance")
         layout = QVBoxLayout(group)
         
         desc = QLabel("Different item tiers get different feature sets for optimal speed and accuracy.")
@@ -266,12 +264,6 @@ class FeaturesTab(QWidget):
         # tier settings
         self._tier_combos = {}
         
-        tier_tooltips = {
-            "A": "High-volume items - use more features for best accuracy",
-            "B": "Medium-volume items - balanced feature set",
-            "C": "Low-volume items - basic features for faster processing"
-        }
-        
         for tier, label, default in [
             ("A", "A-Items (High Volume)", "All 20 Features"),
             ("B", "B-Items (Medium Volume)", "Top 10 Features"),
@@ -281,13 +273,11 @@ class FeaturesTab(QWidget):
             
             tier_label = QLabel(label)
             tier_label.setMinimumWidth(150)
-            tier_label.setToolTip(tier_tooltips[tier])
             tier_layout.addWidget(tier_label)
             
             combo = QComboBox()
             combo.addItems(["All 20 Features", "Top 10 Features", "Basic 5 Features"])
             combo.setCurrentText(default)
-            combo.setToolTip(f"Feature set to use for {tier}-items")
             self._tier_combos[tier] = combo
             tier_layout.addWidget(combo)
             
@@ -298,15 +288,10 @@ class FeaturesTab(QWidget):
     def _create_advanced_group(self) -> QGroupBox:
         # create advanced options group
         group = QGroupBox("Advanced Options")
-        group.setToolTip("Additional configuration for power users")
         layout = QVBoxLayout(group)
         
         # advanced extraction toggle
         self._advanced_check = QCheckBox("Enable advanced feature extraction")
-        self._advanced_check.setToolTip(
-            "Uses TSFresh library for additional statistical features\n"
-            "Adds 5-10 minutes processing time but may improve accuracy by 15-25%"
-        )
         self._advanced_check.stateChanged.connect(self._on_advanced_changed)
         layout.addWidget(self._advanced_check)
         
@@ -322,7 +307,6 @@ class FeaturesTab(QWidget):
         self._max_lag_spin = QSpinBox()
         self._max_lag_spin.setRange(7, 365)
         self._max_lag_spin.setValue(28)
-        self._max_lag_spin.setToolTip("Maximum number of days to look back for lag features (default: 28)")
         lag_layout.addWidget(self._max_lag_spin)
         
         lag_layout.addStretch()
@@ -333,7 +317,6 @@ class FeaturesTab(QWidget):
     def _create_preview_group(self) -> QGroupBox:
         # create preview group
         group = QGroupBox("Feature Preview")
-        group.setToolTip("Summary of selected features and processing time estimate")
         layout = QVBoxLayout(group)
         
         self._preview_label = QLabel("Select features to see preview")
@@ -343,7 +326,6 @@ class FeaturesTab(QWidget):
         
         self._estimate_label = QLabel("")
         self._estimate_label.setWordWrap(True)
-        self._estimate_label.setToolTip("Estimated processing time based on item count and selected features")
         layout.addWidget(self._estimate_label)
         
         return group
@@ -383,6 +365,22 @@ class FeaturesTab(QWidget):
         for check in self._feature_checks.values():
             check.setChecked(False)
         self._update_feature_count()
+    
+    def _select_by_impact(self, impact_level: str) -> None:
+        # add features by impact level to current selection (cumulative)
+        for i in range(self._feature_table.rowCount()):
+            impact_item = self._feature_table.item(i, 3)
+            if impact_item and impact_item.data(Qt.UserRole) == impact_level:
+                name_item = self._feature_table.item(i, 1)
+                if name_item:
+                    feature = name_item.data(Qt.UserRole)
+                    if feature in self._feature_checks:
+                        self._feature_checks[feature].setChecked(True)
+        
+        self._update_feature_count()
+        
+        # switch to custom selection mode
+        self._feature_set_combo.setCurrentText("Custom Selection")
     
     def _on_advanced_changed(self, state: int) -> None:
         # handle advanced checkbox change
@@ -536,7 +534,6 @@ class FeaturesTab(QWidget):
                 impact_item = self._feature_table.item(i, 3)
                 if impact_item:
                     impact_item.setText(impact_text)
-                    impact_item.setToolTip(f"Importance: {imp*100:.1f}% contribution to prediction")
                     
                     if imp >= 0.1:
                         impact_item.setBackground(QBrush(QColor(200, 230, 200)))

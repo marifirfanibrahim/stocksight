@@ -52,7 +52,6 @@ class TimeSeriesChart(QWidget):
         # chart type selector
         self._chart_type = QComboBox()
         self._chart_type.addItems(["Line", "Bar", "Area"])
-        self._chart_type.setToolTip("Change chart visualization type")
         self._chart_type.currentIndexChanged.connect(self._redraw)
         toolbar_layout.addWidget(QLabel("Type:"))
         toolbar_layout.addWidget(self._chart_type)
@@ -60,13 +59,11 @@ class TimeSeriesChart(QWidget):
         # show options
         self._show_forecast = QPushButton("Forecast")
         self._show_forecast.setCheckable(True)
-        self._show_forecast.setToolTip("Show/hide forecast line and confidence intervals")
         self._show_forecast.clicked.connect(self._redraw)
         toolbar_layout.addWidget(self._show_forecast)
         
         self._show_anomalies = QPushButton("Anomalies")
         self._show_anomalies.setCheckable(True)
-        self._show_anomalies.setToolTip("Show/hide detected anomaly markers")
         self._show_anomalies.clicked.connect(self._redraw)
         toolbar_layout.addWidget(self._show_anomalies)
         
@@ -74,17 +71,14 @@ class TimeSeriesChart(QWidget):
         
         # zoom buttons
         self._zoom_1m = QPushButton("1M")
-        self._zoom_1m.setToolTip("Zoom to last 1 month")
         self._zoom_1m.clicked.connect(lambda: self._set_zoom(30))
         toolbar_layout.addWidget(self._zoom_1m)
         
         self._zoom_3m = QPushButton("3M")
-        self._zoom_3m.setToolTip("Zoom to last 3 months")
         self._zoom_3m.clicked.connect(lambda: self._set_zoom(90))
         toolbar_layout.addWidget(self._zoom_3m)
         
         self._zoom_all = QPushButton("All")
-        self._zoom_all.setToolTip("Show all available data")
         self._zoom_all.clicked.connect(lambda: self._set_zoom(None))
         toolbar_layout.addWidget(self._zoom_all)
         
@@ -100,7 +94,6 @@ class TimeSeriesChart(QWidget):
         
         # navigation toolbar
         self._nav_toolbar = NavigationToolbar(self._canvas, self)
-        self._nav_toolbar.setToolTip("Use these tools to pan, zoom, and save the chart")
         layout.addWidget(self._nav_toolbar)
     
     # ---------- FREQUENCY SUPPORT ----------

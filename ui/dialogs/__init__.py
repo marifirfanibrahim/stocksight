@@ -10,6 +10,9 @@ from .anomaly_review_dialog import AnomalyReviewDialog
 from .about_dialog import AboutDialog
 from .welcome_dialog import WelcomeDialog
 from .sheet_selection_dialog import SheetSelectionDialog
+from .abnormal_data_dialog import AbnormalDataDialog
+from .help_dialog import ClusterHelpDialog
+from .anomaly_chart_dialog import AnomalyChartDialog
 
 __all__ = [
     "ColumnMappingDialog",
@@ -18,5 +21,8 @@ __all__ = [
     "AnomalyReviewDialog",
     "AboutDialog",
     "WelcomeDialog",
-    "SheetSelectionDialog"
+    "SheetSelectionDialog",
+    "AbnormalDataDialog",
+    "ClusterHelpDialog",
+    "AnomalyChartDialog"
 ]

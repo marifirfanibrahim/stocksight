@@ -2,6 +2,7 @@
 forecaster module
 generates forecasts using multiple strategies
 supports daily weekly and monthly frequencies
+includes model comparison functionality
 """
 
 import pandas as pd
@@ -817,6 +818,88 @@ class Forecaster:
         
         self.results = results
         return results
+    
+    # ---------- MODEL COMPARISON ----------
+    
+    def compare_models(self,
+                       df: pd.DataFrame,
+                       sku_col: str,
+                       date_col: str,
+                       qty_col: str,
+                       horizon: int = 30,
+                       frequency: str = "D",
+                       sample_size: int = 50) -> Dict[str, Any]:
+        # compare performance of different models on a sample
+        models_to_test = ["naive", "seasonal_naive", "exponential_smoothing", "arima", "theta"]
+        results = {model: {"mape": [], "mae": [], "wins": 0} for model in models_to_test}
+        
+        # select sample skus
+        all_skus = df[sku_col].unique()
+        if len(all_skus) > sample_size:
+            sample_skus = np.random.choice(all_skus, sample_size, replace=False)
+        else:
+            sample_skus = all_skus
+        
+        for sku in sample_skus:
+            sku_df = df[df[sku_col] == sku].copy()
+            
+            # aggregate data
+            aggregated = self.aggregate_to_frequency(sku_df, date_col, qty_col, frequency)
+            ts = aggregated.set_index(aggregated.columns[0])[aggregated.columns[1]]
+            
+            # skip if too little data
+            if len(ts) < 14:
+                continue
+            
+            # split for validation (last 'horizon' points)
+            train = ts[:-horizon] if len(ts) > horizon else ts[:-1]
+            test = ts[-horizon:] if len(ts) > horizon else ts[-1:]
+            
+            if len(train) == 0 or len(test) == 0:
+                continue
+            
+            horizon_periods = len(test)
+            
+            # run each model
+            best_mape = float("inf")
+            best_model = None
+            
+            for model in models_to_test:
+                try:
+                    forecast = self._run_model(train, model, horizon_periods, frequency)
+                    if forecast:
+                        # calculate out-of-sample metrics
+                        metrics = self._calculate_metrics(test.values, forecast["forecast"])
+                        results[model]["mape"].append(metrics["mape"])
+                        results[model]["mae"].append(metrics["mae"])
+                        
+                        if metrics["mape"] < best_mape:
+                            best_mape = metrics["mape"]
+                            best_model = model
+                except Exception:
+                    continue
+            
+            if best_model:
+                results[best_model]["wins"] += 1
+        
+        # aggregate results
+        summary = {}
+        for model, data in results.items():
+            count = len(data["mape"])
+            if count > 0:
+                summary[model] = {
+                    "avg_mape": np.mean(data["mape"]),
+                    "avg_mae": np.mean(data["mae"]),
+                    "win_rate": data["wins"] / len(sample_skus)
+                }
+        
+        best_overall = min(summary.items(), key=lambda x: x[1]["avg_mape"])[0] if summary else "naive"
+        
+        return {
+            "model_stats": summary,
+            "best_overall": best_overall,
+            "sample_size": len(sample_skus)
+        }
     
     # ---------- RESULTS ANALYSIS ----------
     

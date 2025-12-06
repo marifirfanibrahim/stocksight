@@ -22,6 +22,7 @@ from ui.widgets.heatmap_widget import HeatmapWidget
 from ui.widgets.sparklines_widget import SparklinesWidget
 from ui.dialogs.clustering_config_dialog import ClusteringConfigDialog
 from ui.dialogs.anomaly_review_dialog import AnomalyReviewDialog
+from ui.dialogs.help_dialog import ClusterHelpDialog
 from utils.worker_threads import WorkerThread, SimpleWorker
 from ui.widgets.progress_dialog import ProgressDialog
 
@@ -36,7 +37,7 @@ class ExploreTab(QWidget):
     # signals
     clusters_created = pyqtSignal(dict)
     proceed_requested = pyqtSignal()
-    navigate_to_data = pyqtSignal(str)  # sku to correct
+    navigate_to_data = pyqtSignal(str)
     
     def __init__(self, session_model, parent=None):
         # initialize tab
@@ -66,23 +67,26 @@ class ExploreTab(QWidget):
         header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         header_layout.addWidget(header)
         
+        # help button
+        self._help_btn = QPushButton("❓ What do these terms mean?")
+        self._help_btn.setMaximumWidth(200)
+        self._help_btn.clicked.connect(self._show_help)
+        header_layout.addWidget(self._help_btn)
+        
         header_layout.addStretch()
         
         # clustering config button
         self._cluster_config_btn = QPushButton("⚙ Clustering Settings")
-        self._cluster_config_btn.setToolTip("Adjust volume tier thresholds and pattern detection settings")
         self._cluster_config_btn.clicked.connect(self._show_clustering_config)
         header_layout.addWidget(self._cluster_config_btn)
         
         # run clustering button
         self._run_clustering_btn = QPushButton("▶ Run Clustering")
-        self._run_clustering_btn.setToolTip("Group items by volume tier (A/B/C) and sales pattern (seasonal/erratic/steady)")
         self._run_clustering_btn.clicked.connect(self._run_clustering)
         header_layout.addWidget(self._run_clustering_btn)
         
         # detect anomalies button
         self._detect_anomalies_btn = QPushButton("🔍 Detect Anomalies")
-        self._detect_anomalies_btn.setToolTip("Find unusual spikes, drops, or missing data in your time series")
         self._detect_anomalies_btn.clicked.connect(self._detect_anomalies)
         header_layout.addWidget(self._detect_anomalies_btn)
         
@@ -98,11 +102,9 @@ class ExploreTab(QWidget):
         
         nav_label = QLabel("Item Navigator")
         nav_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        nav_label.setToolTip("Browse and filter your items")
         left_layout.addWidget(nav_label)
         
         self._navigator = SKUNavigator()
-        self._navigator.setToolTip("Select items to view their time series and details")
         left_layout.addWidget(self._navigator)
         
         main_splitter.addWidget(left_pane)
@@ -114,7 +116,6 @@ class ExploreTab(QWidget):
         
         # visualization tabs
         self._viz_tabs = QTabWidget()
-        self._viz_tabs.setToolTip("Different views of your data")
         
         # time series tab
         ts_widget = QWidget()
@@ -122,7 +123,6 @@ class ExploreTab(QWidget):
         ts_layout.setContentsMargins(5, 5, 5, 5)
         
         self._chart = TimeSeriesChart()
-        self._chart.setToolTip("Time series chart for selected item - shows historical data and detected anomalies")
         ts_layout.addWidget(self._chart)
         
         self._viz_tabs.addTab(ts_widget, "Time Series")
@@ -134,7 +134,6 @@ class ExploreTab(QWidget):
         
         self._heatmap = HeatmapWidget()
         self._heatmap.set_title("Cluster Distribution")
-        self._heatmap.setToolTip("Click cells to filter items by cluster - rows are volume tiers, columns are patterns")
         heatmap_layout.addWidget(self._heatmap)
         
         self._viz_tabs.addTab(heatmap_widget, "Cluster Map")
@@ -145,7 +144,6 @@ class ExploreTab(QWidget):
         sparklines_layout.setContentsMargins(5, 5, 5, 5)
         
         self._sparklines = SparklinesWidget()
-        self._sparklines.setToolTip("Mini charts showing trends for multiple items - click to select")
         sparklines_layout.addWidget(self._sparklines)
         
         self._viz_tabs.addTab(sparklines_widget, "Sparklines")
@@ -168,7 +166,6 @@ class ExploreTab(QWidget):
         self._details_frame = QFrame()
         self._details_frame.setFrameStyle(QFrame.StyledPanel)
         self._details_frame.setMinimumWidth(260)
-        self._details_frame.setToolTip("Detailed information about selected item")
         details_content = QVBoxLayout(self._details_frame)
         
         self._sku_label = QLabel("Select an item to view details")
@@ -188,14 +185,12 @@ class ExploreTab(QWidget):
         self._bookmark_btn = QPushButton("★ Bookmark")
         self._bookmark_btn.setCheckable(True)
         self._bookmark_btn.setEnabled(False)
-        self._bookmark_btn.setToolTip("Save this item for quick access - bookmarked items can be filtered in navigator")
         self._bookmark_btn.clicked.connect(self._toggle_bookmark)
         details_content.addWidget(self._bookmark_btn)
         
         self._flag_btn = QPushButton("⚠ Flag for Correction")
         self._flag_btn.setEnabled(False)
         self._flag_btn.setMinimumWidth(180)
-        self._flag_btn.setToolTip("Mark this item for data review - will appear in Data tab for correction")
         self._flag_btn.clicked.connect(self._flag_for_correction)
         details_content.addWidget(self._flag_btn)
         
@@ -227,7 +222,6 @@ class ExploreTab(QWidget):
         self._proceed_btn.setEnabled(False)
         self._proceed_btn.setMinimumHeight(40)
         self._proceed_btn.setStyleSheet(f"background-color: {config.UI_COLORS['primary']}; color: white; font-weight: bold;")
-        self._proceed_btn.setToolTip("Continue to create features for forecasting models")
         self._proceed_btn.clicked.connect(self.proceed_requested.emit)
         bottom_layout.addWidget(self._proceed_btn)
         
@@ -236,7 +230,6 @@ class ExploreTab(QWidget):
     def _create_cluster_summary(self) -> QGroupBox:
         # create cluster summary group
         group = QGroupBox("Cluster Summary")
-        group.setToolTip("Overview of how items are distributed across clusters")
         layout = QVBoxLayout(group)
         
         self._cluster_summary_label = QLabel("Run clustering to see summary")
@@ -250,7 +243,6 @@ class ExploreTab(QWidget):
     def _create_anomaly_summary(self) -> QGroupBox:
         # create anomaly summary group
         group = QGroupBox("Anomalies")
-        group.setToolTip("Summary of detected data anomalies")
         layout = QVBoxLayout(group)
         
         self._anomaly_summary_label = QLabel("Run detection to find anomalies")
@@ -260,7 +252,6 @@ class ExploreTab(QWidget):
         
         self._review_anomalies_btn = QPushButton("Review Anomalies")
         self._review_anomalies_btn.setEnabled(False)
-        self._review_anomalies_btn.setToolTip("Open anomaly review dialog to inspect and take action on detected issues")
         self._review_anomalies_btn.clicked.connect(self._show_anomaly_review)
         layout.addWidget(self._review_anomalies_btn)
         
@@ -274,6 +265,13 @@ class ExploreTab(QWidget):
         self._navigator.selection_changed.connect(self._on_navigator_selection_changed)
         self._heatmap.cell_clicked.connect(self._on_heatmap_cell_clicked)
         self._sparklines.sku_selected.connect(self._on_sku_selected)
+    
+    # ---------- HELP ----------
+    
+    def _show_help(self) -> None:
+        # show cluster terminology help dialog
+        dialog = ClusterHelpDialog(self)
+        dialog.exec_()
     
     # ---------- DATA LOADING ----------
     
@@ -438,14 +436,14 @@ class ExploreTab(QWidget):
     # ---------- ANOMALY DETECTION ----------
     
     def _detect_anomalies(self) -> None:
-        # detect anomalies in data
+        # detect anomalies in data - runs on all skus
         if self._processor is None:
             QMessageBox.warning(self, "No Data", "Please load data first")
             return
         
         # show progress
         progress = ProgressDialog("Detecting Anomalies", self)
-        progress.set_status("Scanning for unusual values...")
+        progress.set_status("Scanning all items for unusual values...")
         progress.start()
         
         # get column names
@@ -514,6 +512,7 @@ class ExploreTab(QWidget):
             return
         
         dialog = AnomalyReviewDialog(playlist, self)
+        dialog.set_processor(self._processor)
         dialog.anomalies_actioned.connect(self._on_anomalies_actioned)
         dialog.navigate_to_sku.connect(self._navigate_to_sku)
         dialog.flag_for_correction.connect(self._on_flag_for_correction)

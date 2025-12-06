@@ -26,17 +26,22 @@ class AnomalyReviewDialog(QDialog):
     # dialog for reviewing anomalies
     
     # signals
-    anomalies_actioned = pyqtSignal(list)  # list of (anomaly, action) tuples
-    anomalies_corrected = pyqtSignal(list)  # list of anomalies to correct
+    anomalies_actioned = pyqtSignal(list)
+    anomalies_corrected = pyqtSignal(list)
     navigate_to_sku = pyqtSignal(str)
-    flag_for_correction = pyqtSignal(str)  # sku to flag
+    flag_for_correction = pyqtSignal(str)
+    view_sku_chart = pyqtSignal(str)
     
-    def __init__(self, anomalies: List[Anomaly], parent=None):
+    # ---------- CONSTANTS ----------
+    ROW_HEIGHT = 45
+    
+    def __init__(self, anomalies: List[Anomaly], parent=None, processor=None):
         # initialize dialog
         super().__init__(parent)
         
         self._anomalies = anomalies
-        self._actions = {}  # anomaly index -> action
+        self._processor = processor
+        self._actions = {}
         self._setup_ui()
         self._populate_table()
     
@@ -45,8 +50,9 @@ class AnomalyReviewDialog(QDialog):
     def _setup_ui(self) -> None:
         # setup user interface
         self.setWindowTitle("Review Anomalies")
-        self.setMinimumWidth(900)
-        self.setMinimumHeight(600)
+        self.setMinimumWidth(950)
+        self.setMinimumHeight(650)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -69,7 +75,7 @@ class AnomalyReviewDialog(QDialog):
         header_layout.addWidget(self._type_filter)
         
         self._severity_filter = QComboBox()
-        self._severity_filter.addItems(["All Severity", "High Only", "Medium+"])
+        self._severity_filter.addItems(["All Severity", "High Only (≥70%)", "Medium+ (≥40%)"])
         self._severity_filter.currentIndexChanged.connect(self._apply_filter)
         header_layout.addWidget(self._severity_filter)
         
@@ -87,6 +93,9 @@ class AnomalyReviewDialog(QDialog):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        
+        # set taller row height
+        self._table.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
         
         layout.addWidget(self._table)
         
@@ -178,7 +187,7 @@ class AnomalyReviewDialog(QDialog):
         self._table.setRowCount(len(self._anomalies))
         
         for i, anomaly in enumerate(self._anomalies):
-            # sku - make selectable for copy
+            # sku
             sku_item = QTableWidgetItem(anomaly.sku)
             sku_item.setFlags(sku_item.flags() | Qt.ItemIsSelectable)
             self._table.setItem(i, 0, sku_item)
@@ -259,11 +268,12 @@ class AnomalyReviewDialog(QDialog):
                 elif type_filter == "gaps" and anomaly.anomaly_type != "gap":
                     show = False
             
-            # severity filter
-            if severity_filter == "High Only" and anomaly.severity < 0.7:
-                show = False
-            elif severity_filter == "Medium+" and anomaly.severity < 0.4:
-                show = False
+            # severity filter - fixed logic
+            if show:
+                if "High Only" in severity_filter and anomaly.severity < 0.7:
+                    show = False
+                elif "Medium+" in severity_filter and anomaly.severity < 0.4:
+                    show = False
             
             self._table.setRowHidden(i, not show)
         
@@ -309,7 +319,6 @@ class AnomalyReviewDialog(QDialog):
         self._batch_combo.setCurrentIndex(0)
         self._update_summary()
         
-        # show confirmation
         QMessageBox.information(
             self,
             "Batch Action Applied",
@@ -348,14 +357,40 @@ class AnomalyReviewDialog(QDialog):
         self._details_label.setText(details)
     
     def _view_in_chart(self) -> None:
-        # emit signal to view sku in chart
+        # open sku chart in separate window
         selected = self._table.selectedItems()
-        if selected:
-            row = selected[0].row()
-            item = self._table.item(row, 0)
-            if item:
-                anomaly = item.data(Qt.UserRole)
-                self.navigate_to_sku.emit(anomaly.sku)
+        if not selected:
+            return
+        
+        row = selected[0].row()
+        item = self._table.item(row, 0)
+        if not item:
+            return
+        
+        anomaly = item.data(Qt.UserRole)
+        sku = anomaly.sku
+        
+        # get sku data from processor if available
+        if self._processor:
+            sku_data = self._processor.get_sku_data(sku)
+            date_col = self._processor.get_mapped_column("date")
+            qty_col = self._processor.get_mapped_column("quantity")
+            
+            # get all anomalies for this sku
+            sku_anomalies = [
+                {"date": a.date, "value": a.value, "type": a.anomaly_type}
+                for a in self._anomalies if a.sku == sku
+            ]
+            
+            from ui.dialogs.anomaly_chart_dialog import AnomalyChartDialog
+            
+            dialog = AnomalyChartDialog(
+                sku, sku_data, date_col, qty_col, sku_anomalies, self
+            )
+            dialog.exec_()
+        else:
+            # emit signal for external handling
+            self.view_sku_chart.emit(sku)
     
     def _flag_selected(self) -> None:
         # flag selected anomaly for correction
@@ -436,11 +471,13 @@ class AnomalyReviewDialog(QDialog):
         # apply all actions
         result = []
         flagged_skus = []
+        action_summary = {}
         
         for i, anomaly in enumerate(self._anomalies):
             action = self._actions.get(i, "Pending")
             if action != "Pending":
                 result.append((anomaly, action))
+                action_summary[action] = action_summary.get(action, 0) + 1
                 if action == "Flag":
                     flagged_skus.append(anomaly.sku)
         
@@ -451,19 +488,23 @@ class AnomalyReviewDialog(QDialog):
         for sku in set(flagged_skus):
             self.flag_for_correction.emit(sku)
         
-        # show summary
+        # show detailed confirmation
         if result:
-            action_counts = {}
-            for _, action in result:
-                action_counts[action] = action_counts.get(action, 0) + 1
-            
-            summary = "\n".join([f"• {v} {k}" for k, v in action_counts.items()])
+            summary_lines = [f"• {v} anomalies: {k}" for k, v in action_summary.items()]
             
             QMessageBox.information(
                 self,
-                "Actions Applied",
-                f"Applied actions:\n{summary}\n\n"
-                f"Flagged items can be found in the Data tab."
+                "Actions Applied Successfully",
+                f"Applied {len(result)} actions:\n\n" +
+                "\n".join(summary_lines) +
+                f"\n\n{len(set(flagged_skus))} unique items flagged for correction.\n"
+                "Flagged items can be found in the Data tab."
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "No Actions",
+                "No actions were applied.\nAll anomalies are still pending."
             )
         
         self.accept()
@@ -475,3 +516,7 @@ class AnomalyReviewDialog(QDialog):
             action = self._actions.get(i, "Pending")
             result.append((anomaly, action))
         return result
+    
+    def set_processor(self, processor) -> None:
+        # set data processor for chart viewing
+        self._processor = processor

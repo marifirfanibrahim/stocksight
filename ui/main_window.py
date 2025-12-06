@@ -7,7 +7,8 @@ manages tabs and navigation
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QStatusBar, QMenuBar, QMenu, QAction,
-    QMessageBox, QLabel, QProgressBar, QToolBar
+    QMessageBox, QLabel, QProgressBar, QToolBar,
+    QFileDialog
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
@@ -22,6 +23,7 @@ from ui.tabs.forecast_tab import ForecastTab
 from ui.dialogs.about_dialog import AboutDialog
 from ui.dialogs.welcome_dialog import WelcomeDialog
 from utils.memory_manager import MemoryManager
+from utils.file_handlers import FileHandler
 
 
 # ============================================================================
@@ -37,6 +39,7 @@ class MainWindow(QMainWindow):
         
         self._session = SessionModel()
         self._memory_manager = MemoryManager()
+        self._file_handler = FileHandler()
         
         self._setup_window()
         self._setup_menu()
@@ -76,26 +79,37 @@ class MainWindow(QMainWindow):
         
         open_action = QAction("&Open Data...", self)
         open_action.setShortcut(QKeySequence.Open)
-        open_action.setToolTip("Open a data file (CSV, Excel, Parquet)")
         open_action.triggered.connect(self._on_open_file)
         file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        # session submenu
+        session_menu = file_menu.addMenu("&Session")
+        
+        save_session_action = QAction("&Save Session...", self)
+        save_session_action.setShortcut(QKeySequence.Save)
+        save_session_action.triggered.connect(self._on_save_session)
+        session_menu.addAction(save_session_action)
+        
+        load_session_action = QAction("&Load Session...", self)
+        load_session_action.setShortcut("Ctrl+Shift+O")
+        load_session_action.triggered.connect(self._on_load_session)
+        session_menu.addAction(load_session_action)
         
         file_menu.addSeparator()
         
         export_menu = file_menu.addMenu("&Export")
         
         export_csv_action = QAction("Export to &CSV", self)
-        export_csv_action.setToolTip("Export forecasts to CSV")
         export_csv_action.triggered.connect(self._on_export_csv)
         export_menu.addAction(export_csv_action)
         
         export_excel_action = QAction("Export to &Excel", self)
-        export_excel_action.setToolTip("Export forecasts to Excel")
         export_excel_action.triggered.connect(self._on_export_excel)
         export_menu.addAction(export_excel_action)
         
         export_ppt_action = QAction("Export to &PowerPoint", self)
-        export_ppt_action.setToolTip("Export forecast summary to PowerPoint")
         export_ppt_action.triggered.connect(self._on_export_ppt)
         export_menu.addAction(export_ppt_action)
         
@@ -110,7 +124,6 @@ class MainWindow(QMainWindow):
         edit_menu = menubar.addMenu("&Edit")
         
         reset_action = QAction("&Reset Session", self)
-        reset_action.setToolTip("Clear all data and start over")
         reset_action.triggered.connect(self._on_reset_session)
         edit_menu.addAction(reset_action)
         
@@ -129,7 +142,6 @@ class MainWindow(QMainWindow):
         
         welcome_action = QAction("&Quick Start Guide", self)
         welcome_action.setShortcut("F1")
-        welcome_action.setToolTip("Show the welcome screen")
         welcome_action.triggered.connect(self._show_welcome_dialog)
         help_menu.addAction(welcome_action)
         
@@ -151,13 +163,13 @@ class MainWindow(QMainWindow):
         self._step_labels = []
         
         steps = [
-            ("1", "Data Health", "Load and clean your data"),
-            ("2", "Patterns", "Discover item patterns"),
-            ("3", "Features", "Create smart features"),
-            ("4", "Forecast", "Generate forecasts")
+            ("1", "Data Health"),
+            ("2", "Patterns"),
+            ("3", "Features"),
+            ("4", "Forecast")
         ]
         
-        for i, (num, name, tooltip) in enumerate(steps):
+        for i, (num, name) in enumerate(steps):
             # step container
             step_widget = QWidget()
             step_layout = QHBoxLayout(step_widget)
@@ -183,8 +195,6 @@ class MainWindow(QMainWindow):
             name_label.setStyleSheet("color: #666;")
             step_layout.addWidget(name_label)
             
-            step_widget.setToolTip(tooltip)
-            
             self._step_labels.append((num_label, name_label))
             
             toolbar.addWidget(step_widget)
@@ -206,7 +216,6 @@ class MainWindow(QMainWindow):
         # session info
         self._session_info_label = QLabel("No data loaded")
         self._session_info_label.setStyleSheet("color: gray;")
-        self._session_info_label.setToolTip("Current session statistics")
         toolbar.addWidget(self._session_info_label)
     
     # ---------- TABS SETUP ----------
@@ -229,12 +238,6 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._features_tab, "3. Feature Engineering")
         self._tabs.addTab(self._forecast_tab, "4. Forecast Factory")
         
-        # set tab tooltips
-        self._tabs.setTabToolTip(0, "Upload and validate your data")
-        self._tabs.setTabToolTip(1, "Explore patterns and cluster items")
-        self._tabs.setTabToolTip(2, "Create features for forecasting")
-        self._tabs.setTabToolTip(3, "Generate and export forecasts")
-        
         # disable tabs until data is loaded
         for i in range(1, 4):
             self._tabs.setTabEnabled(i, False)
@@ -255,7 +258,6 @@ class MainWindow(QMainWindow):
         # memory indicator
         self._memory_label = QLabel("Memory: --")
         self._memory_label.setStyleSheet("color: gray;")
-        self._memory_label.setToolTip("Current application memory usage")
         self._statusbar.addPermanentWidget(self._memory_label)
         
         # progress bar
@@ -379,6 +381,7 @@ class MainWindow(QMainWindow):
     def _on_navigate_to_data(self, sku: str) -> None:
         # handle navigation to data tab for correction
         self._data_tab.add_flagged_sku(sku)
+        self._switch_to_tab(0)
     
     # ---------- UI UPDATES ----------
     
@@ -411,7 +414,7 @@ class MainWindow(QMainWindow):
                 # future step
                 num_label.setStyleSheet("""
                     QLabel {
-                        background-color: #ddd;
+                       	background-color: #ddd;
                         color: #666;
                         border-radius: 12px;
                         font-weight: bold;
@@ -449,6 +452,150 @@ class MainWindow(QMainWindow):
         # switch to specific tab
         if self._tabs.isTabEnabled(index):
             self._tabs.setCurrentIndex(index)
+    
+    # ---------- SESSION SAVE/LOAD ----------
+    
+    def _on_save_session(self) -> None:
+        # save current session
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Session",
+            "stocksight_session.sss",
+            "StockSight Session (*.sss);;All Files (*)"
+        )
+        
+        if path:
+            session_data = self._session.get_export_data()
+            session_data["processed_data"] = self._session.get_data()
+            session_data["features"] = self._session.get_features()
+            
+            success, message = self._file_handler.save_session(session_data, path)
+            
+            if success:
+                QMessageBox.information(self, "Session Saved", f"Session saved to:\n{path}")
+            else:
+                QMessageBox.warning(self, "Save Failed", f"Failed to save session:\n{message}")
+    
+    def _on_load_session(self) -> None:
+        # load session from file
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Session",
+            "",
+            "StockSight Session (*.sss);;All Files (*)"
+        )
+        
+        if path:
+            session_data, message = self._file_handler.load_session(path)
+            
+            if session_data:
+                # confirm overwrite current session
+                if self._session.state.file_loaded:
+                    reply = QMessageBox.question(
+                        self,
+                        "Load Session",
+                        "Loading a session will replace your current work.\nContinue?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    
+                    if reply == QMessageBox.No:
+                        return
+                
+                # reset and restore session state
+                self._session.reset()
+                
+                # restore core session data
+                self._session.set_data(session_data.get("processed_data"))
+                self._session.set_column_mapping(session_data.get("column_mapping", {}))
+                self._session.set_clusters(session_data.get("clusters", {}))
+                self._session.set_features(session_data.get("features", {}))
+                self._session.set_forecasts(session_data.get("forecasts", {}))
+                self._session.set_anomalies(session_data.get("anomalies", {}))
+                
+                # restore bookmarks
+                for bookmark in session_data.get("bookmarks", []):
+                    self._session.add_bookmark(bookmark.get("sku"), bookmark.get("note", ""))
+                
+                # restore summary values
+                summary = session_data.get("session_summary", {})
+                self._session.update_state(
+                    file_path=summary.get("file", ""),
+                    total_rows=summary.get("rows", 0),
+                    total_skus=summary.get("skus", 0),
+                    total_categories=summary.get("categories", 0),
+                    data_quality_score=summary.get("quality_score", 0)
+                )
+                
+                # restore data processor in data tab
+                processor = self._data_tab.get_processor()
+                processor.processed_data = session_data.get("processed_data")
+                processor.set_column_mapping(session_data.get("column_mapping", {}))
+                
+                if processor.processed_data is not None and processor.get_mapped_column("sku"):
+                    sku_col = processor.get_mapped_column("sku")
+                    processor.sku_list = processor.processed_data[sku_col].unique().tolist()
+                
+                # refresh data tab ui
+                if processor.column_mapping:
+                    self._data_tab._update_mapping_display(processor.column_mapping)
+                self._data_tab._calculate_quality()
+                self._data_tab._classify_skus()
+                if processor.processed_data is not None:
+                    self._data_tab._data_table.set_data(processor.processed_data.head(1000))
+                
+                # restore explore tab
+                self._tabs.setTabEnabled(1, True)
+                self._explore_tab.set_processor(processor)
+                clusters = session_data.get("clusters", {})
+                clustering = self._explore_tab.get_clustering()
+                clustering.sku_clusters = clusters
+                clustering._calculate_cluster_summary()
+                self._explore_tab._navigator.set_clusters(clusters)
+                self._explore_tab._heatmap.set_cluster_matrix(clustering.cluster_summary)
+                summary_list = clustering.get_cluster_summary()
+                self._explore_tab._cluster_summary_label.setText(
+                    self._explore_tab._format_cluster_summary(summary_list)
+                )
+                
+                # restore features tab
+                self._tabs.setTabEnabled(2, True)
+                self._features_tab.set_processor(processor)
+                self._features_tab.set_clustering(clustering)
+                features_data = session_data.get("features", {})
+                if features_data:
+                    self._features_tab._update_importance_display(
+                        features_data.get("importance", {})
+                    )
+                    selected_feats = features_data.get("selected_features", [])
+                    if selected_feats:
+                        self._features_tab._select_features(selected_feats)
+                
+                # restore forecast tab
+                forecasts = session_data.get("forecasts", {})
+                if forecasts:
+                    self._tabs.setTabEnabled(3, True)
+                    self._forecast_tab.set_processor(processor)
+                    self._forecast_tab._results_model.set_forecasts(forecasts)
+                    self._forecast_tab._update_summary()
+                    self._forecast_tab._enable_export(True)
+                
+                # update main window state
+                step = self._session.get_workflow_step()
+                for i in range(1, 4):
+                    self._tabs.setTabEnabled(i, self._session.can_proceed_to_tab(i))
+                
+                self._update_step_indicators(step, completed=(step == 4))
+                self._update_session_info()
+                self._set_status("Session loaded successfully")
+                
+                QMessageBox.information(
+                    self,
+                    "Session Loaded",
+                    "Session loaded successfully.\nYou can continue from where you left off."
+                )
+            else:
+                QMessageBox.warning(self, "Load Failed", f"Failed to load session:\n{message}")
     
     # ---------- MENU ACTIONS ----------
     
