@@ -143,3 +143,54 @@ pip install -r requirements.txt
 ```Bash
 python main.py
 ```
+
+---
+
+## 5. Data Requirements
+Your input data should be transactional or aggregated time series, with at least:
+
+* A date column (daily, weekly, or monthly).
+* An item/SKU identifier.
+* A quantity or demand/sales measure.
+
+Optional columns that improve results:
+* Category / Group
+* Price
+* Promotion / Campaign flag
+
+Supported file formats:
+* CSV
+* Excel (.xlsx, .xls, multiple sheets supported)
+* Parquet
+
+Max default file size: **500 MB** (configurable in config.py).
+
+---
+
+## 6. Configuration
+Most behavior is controlled through config.py, including:
+* Column detection keywords and thresholds.
+* Clustering thresholds for A/B/C and pattern types.
+* Feature sets and group rules (A/B/C usage).
+* Forecast strategy definitions and timing estimates.
+* Performance settings (chunk size, max SKUs in memory).
+* Export formats and template colors.
+
+You can adjust these values without touching UI code.
+
+---
+
+## 7. Notes and Tips
+For large datasets (10K+ SKUs × 2+ years daily), let the app complete each step rather than opening many windows at once.
+
+Use the Data Cleaning & Anomalies help item in the Help menu to understand how:
+* Data Health fixes in Tab 1,
+* Abnormal Data review in Tab 1,
+* Anomaly detection in Tab 2 work together.
+  
+It is usually enough to:
+* Clean obvious issues once,
+* Run anomaly detection once or twice,
+* Then move on to forecasting.
+  
+If you are unsure about a setting, the defaults are chosen to be safe and reasonable for most business use cases.
