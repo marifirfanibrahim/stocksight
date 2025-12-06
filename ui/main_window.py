@@ -22,6 +22,7 @@ from ui.tabs.features_tab import FeaturesTab
 from ui.tabs.forecast_tab import ForecastTab
 from ui.dialogs.about_dialog import AboutDialog
 from ui.dialogs.welcome_dialog import WelcomeDialog
+from ui.dialogs.help_dialog import DataCleaningHelpDialog
 from utils.memory_manager import MemoryManager
 from utils.file_handlers import FileHandler
 
@@ -48,10 +49,10 @@ class MainWindow(QMainWindow):
         self._setup_statusbar()
         self._connect_signals()
         
-        # start memory monitor
+        # start memory monitor timer
         self._start_memory_monitor()
         
-        # show welcome dialog after window is shown
+        # show welcome dialog after window is visible
         QTimer.singleShot(100, self._show_welcome_dialog)
     
     # ---------- WINDOW SETUP ----------
@@ -62,7 +63,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(config.WINDOW_MIN_WIDTH, config.WINDOW_MIN_HEIGHT)
         self.resize(config.WINDOW_DEFAULT_WIDTH, config.WINDOW_DEFAULT_HEIGHT)
         
-        # center on screen
+        # center window on screen
         screen = self.screen().geometry()
         x = (screen.width() - self.width()) // 2
         y = (screen.height() - self.height()) // 2
@@ -71,10 +72,10 @@ class MainWindow(QMainWindow):
     # ---------- MENU SETUP ----------
     
     def _setup_menu(self) -> None:
-        # setup menu bar
+        # setup menu bar and menus
         menubar = self.menuBar()
         
-        # file menu
+        # file menu setup
         file_menu = menubar.addMenu("&File")
         
         open_action = QAction("&Open Data...", self)
@@ -120,14 +121,14 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # edit menu
+        # edit menu setup
         edit_menu = menubar.addMenu("&Edit")
         
         reset_action = QAction("&Reset Session", self)
         reset_action.triggered.connect(self._on_reset_session)
         edit_menu.addAction(reset_action)
         
-        # view menu
+        # view menu setup
         view_menu = menubar.addMenu("&View")
         
         for i, name in config.TAB_NAMES.items():
@@ -137,15 +138,20 @@ class MainWindow(QMainWindow):
             action.triggered.connect(self._on_switch_tab)
             view_menu.addAction(action)
         
-        # help menu
+        # help menu setup
         help_menu = menubar.addMenu("&Help")
         
-        welcome_action = QAction("&Quick Start Guide", self)
-        welcome_action.setShortcut("F1")
-        welcome_action.triggered.connect(self._show_welcome_dialog)
-        help_menu.addAction(welcome_action)
+        # data cleaning help item
+        data_help_action = QAction("&Learn", self)
+        data_help_action.setShortcut("F1")
+        data_help_action.triggered.connect(self._show_data_help)
+        help_menu.addAction(data_help_action)
         
         help_menu.addSeparator()
+
+        welcome_action = QAction("&Welcome", self)
+        welcome_action.triggered.connect(self._show_welcome_dialog)
+        help_menu.addAction(welcome_action)
         
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
@@ -154,7 +160,7 @@ class MainWindow(QMainWindow):
     # ---------- TOOLBAR SETUP ----------
     
     def _setup_toolbar(self) -> None:
-        # setup toolbar
+        # setup toolbar and workflow indicators
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
@@ -170,13 +176,13 @@ class MainWindow(QMainWindow):
         ]
         
         for i, (num, name) in enumerate(steps):
-            # step container
+            # step container widget
             step_widget = QWidget()
             step_layout = QHBoxLayout(step_widget)
             step_layout.setContentsMargins(10, 2, 10, 2)
             step_layout.setSpacing(5)
             
-            # step number
+            # step number label
             num_label = QLabel(num)
             num_label.setFixedSize(24, 24)
             num_label.setAlignment(Qt.AlignCenter)
@@ -190,7 +196,7 @@ class MainWindow(QMainWindow):
             """)
             step_layout.addWidget(num_label)
             
-            # step name
+            # step name label
             name_label = QLabel(name)
             name_label.setStyleSheet("color: #666;")
             step_layout.addWidget(name_label)
@@ -199,7 +205,7 @@ class MainWindow(QMainWindow):
             
             toolbar.addWidget(step_widget)
             
-            # arrow between steps
+            # add arrow between steps
             if i < len(steps) - 1:
                 arrow = QLabel("→")
                 arrow.setStyleSheet("color: #ccc; font-size: 16px;")
@@ -207,13 +213,12 @@ class MainWindow(QMainWindow):
         
         toolbar.addSeparator()
         
-        # spacer
+        # spacer widget
         spacer = QWidget()
-        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
         spacer.setMinimumWidth(50)
         toolbar.addWidget(spacer)
         
-        # session info
+        # session info label
         self._session_info_label = QLabel("No data loaded")
         self._session_info_label.setStyleSheet("color: gray;")
         toolbar.addWidget(self._session_info_label)
@@ -226,19 +231,19 @@ class MainWindow(QMainWindow):
         self._tabs.setDocumentMode(True)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         
-        # create tabs
+        # create tab instances
         self._data_tab = DataTab(self._session)
         self._explore_tab = ExploreTab(self._session)
         self._features_tab = FeaturesTab(self._session)
         self._forecast_tab = ForecastTab(self._session)
         
-        # add tabs
+        # add tabs to widget
         self._tabs.addTab(self._data_tab, "1. Data Health")
         self._tabs.addTab(self._explore_tab, "2. Pattern Discovery")
         self._tabs.addTab(self._features_tab, "3. Feature Engineering")
         self._tabs.addTab(self._forecast_tab, "4. Forecast Factory")
         
-        # disable tabs until data is loaded
+        # disable tabs until data is ready
         for i in range(1, 4):
             self._tabs.setTabEnabled(i, False)
         
@@ -247,11 +252,11 @@ class MainWindow(QMainWindow):
     # ---------- STATUS BAR SETUP ----------
     
     def _setup_statusbar(self) -> None:
-        # setup status bar
+        # setup status bar widgets
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
         
-        # status message
+        # status message label
         self._status_message = QLabel("Ready")
         self._statusbar.addWidget(self._status_message, stretch=1)
         
@@ -269,7 +274,7 @@ class MainWindow(QMainWindow):
     # ---------- SIGNAL CONNECTIONS ----------
     
     def _connect_signals(self) -> None:
-        # connect tab signals
+        # connect signals between tabs and session
         
         # data tab signals
         self._data_tab.data_loaded.connect(self._on_data_loaded)
@@ -298,6 +303,13 @@ class MainWindow(QMainWindow):
         dialog = WelcomeDialog(self)
         dialog.exec_()
     
+    # ---------- DATA HELP DIALOG ----------
+    
+    def _show_data_help(self) -> None:
+        # show data cleaning help dialog
+        dialog = DataCleaningHelpDialog(self)
+        dialog.exec_()
+    
     # ---------- MEMORY MONITORING ----------
     
     def _start_memory_monitor(self) -> None:
@@ -315,7 +327,7 @@ class MainWindow(QMainWindow):
         
         self._memory_label.setText(f"Memory: {rss:.0f} MB ({pct:.1f}%)")
         
-        # color based on usage
+        # change color based on usage
         if pct > 80:
             self._memory_label.setStyleSheet("color: red;")
         elif pct > 60:
@@ -326,20 +338,20 @@ class MainWindow(QMainWindow):
     # ---------- EVENT HANDLERS ----------
     
     def _on_tab_changed(self, index: int) -> None:
-        # handle tab change
+        # handle tab change event
         self._update_step_indicators(index)
     
     def _on_data_loaded(self, summary: dict) -> None:
-        # handle data loaded
+        # handle data loaded event
         self._update_session_info()
         self._set_status("Data loaded successfully")
     
     def _on_data_processed(self) -> None:
-        # handle data processed
+        # handle data processed event
         # enable explore tab
         self._tabs.setTabEnabled(1, True)
         
-        # pass processor to other tabs
+        # share processor with other tabs
         processor = self._data_tab.get_processor()
         self._explore_tab.set_processor(processor)
         self._features_tab.set_processor(processor)
@@ -350,11 +362,9 @@ class MainWindow(QMainWindow):
         self._set_status("Data processed - ready for pattern discovery")
     
     def _on_clusters_created(self, clusters: dict) -> None:
-        # handle clusters created
-        # enable features tab
+        # handle clusters created event
         self._tabs.setTabEnabled(2, True)
         
-        # pass clustering to features tab
         clustering = self._explore_tab.get_clustering()
         self._features_tab.set_clustering(clustering)
         
@@ -362,24 +372,23 @@ class MainWindow(QMainWindow):
         self._set_status(f"Created {len(clusters):,} cluster assignments")
     
     def _on_features_created(self, features: dict) -> None:
-        # handle features created
-        # enable forecast tab
+        # handle features created event
         self._tabs.setTabEnabled(3, True)
         
         self._update_step_indicators(2, completed=True)
         self._set_status("Features created - ready for forecasting")
     
     def _on_forecasts_generated(self, forecasts: dict) -> None:
-        # handle forecasts generated
+        # handle forecasts generated event
         self._update_step_indicators(3, completed=True)
         self._set_status(f"Generated forecasts for {len(forecasts):,} items")
     
     def _on_session_changed(self, property_name: str) -> None:
-        # handle session state change
+        # handle session state change event
         self._update_session_info()
     
     def _on_navigate_to_data(self, sku: str) -> None:
-        # handle navigation to data tab for correction
+        # handle navigation request back to data tab
         self._data_tab.add_flagged_sku(sku)
     
     # ---------- UI UPDATES ----------
@@ -388,7 +397,7 @@ class MainWindow(QMainWindow):
         # update workflow step indicators
         for i, (num_label, name_label) in enumerate(self._step_labels):
             if i < current_index or (i == current_index and completed):
-                # completed step
+                # completed step style
                 num_label.setStyleSheet("""
                     QLabel {
                         background-color: #28A745;
@@ -399,7 +408,7 @@ class MainWindow(QMainWindow):
                 """)
                 name_label.setStyleSheet("color: #28A745; font-weight: bold;")
             elif i == current_index:
-                # current step
+                # current step style
                 num_label.setStyleSheet("""
                     QLabel {
                         background-color: #2E86AB;
@@ -410,10 +419,10 @@ class MainWindow(QMainWindow):
                 """)
                 name_label.setStyleSheet("color: #2E86AB; font-weight: bold;")
             else:
-                # future step
+                # future step style
                 num_label.setStyleSheet("""
                     QLabel {
-                       	background-color: #ddd;
+                        background-color: #ddd;
                         color: #666;
                         border-radius: 12px;
                         font-weight: bold;
@@ -422,7 +431,7 @@ class MainWindow(QMainWindow):
                 name_label.setStyleSheet("color: #666;")
     
     def _update_session_info(self) -> None:
-        # update session info display
+        # update session info label text
         state = self._session.state
         
         if not state.file_loaded:
@@ -448,14 +457,14 @@ class MainWindow(QMainWindow):
         self._status_message.setText(message)
     
     def _switch_to_tab(self, index: int) -> None:
-        # switch to specific tab
+        # switch to specific tab if enabled
         if self._tabs.isTabEnabled(index):
             self._tabs.setCurrentIndex(index)
     
     # ---------- SESSION SAVE/LOAD ----------
     
     def _on_save_session(self) -> None:
-        # save current session
+        # save current session to file
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Session",
@@ -488,7 +497,7 @@ class MainWindow(QMainWindow):
             session_data, message = self._file_handler.load_session(path)
             
             if session_data:
-                # confirm overwrite current session
+                # confirm overwrite
                 if self._session.state.file_loaded:
                     reply = QMessageBox.question(
                         self,
@@ -501,10 +510,10 @@ class MainWindow(QMainWindow):
                     if reply == QMessageBox.No:
                         return
                 
-                # reset and restore session state
+                # reset state and restore
                 self._session.reset()
                 
-                # restore core session data
+                # restore data and mappings
                 self._session.set_data(session_data.get("processed_data"))
                 self._session.set_column_mapping(session_data.get("column_mapping", {}))
                 self._session.set_clusters(session_data.get("clusters", {}))
@@ -526,7 +535,7 @@ class MainWindow(QMainWindow):
                     data_quality_score=summary.get("quality_score", 0)
                 )
                 
-                # restore data processor in data tab
+                # update data tab processor
                 processor = self._data_tab.get_processor()
                 processor.processed_data = session_data.get("processed_data")
                 processor.set_column_mapping(session_data.get("column_mapping", {}))
@@ -599,24 +608,24 @@ class MainWindow(QMainWindow):
     # ---------- MENU ACTIONS ----------
     
     def _on_open_file(self) -> None:
-        # open file action
+        # open file picker and route to data tab
         self._switch_to_tab(0)
         self._data_tab._browse_file()
     
     def _on_export_csv(self) -> None:
-        # export csv action
+        # export forecasts to csv
         self._forecast_tab._export_csv()
     
     def _on_export_excel(self) -> None:
-        # export excel action
+        # export forecasts to excel
         self._forecast_tab._export_excel()
     
     def _on_export_ppt(self) -> None:
-        # export ppt action
+        # export forecasts to powerpoint
         self._forecast_tab._export_ppt()
     
     def _on_reset_session(self) -> None:
-        # reset session action
+        # reset session state
         reply = QMessageBox.question(
             self,
             "Reset Session",
@@ -628,7 +637,7 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             self._session.reset()
             
-            # reset tabs
+            # disable non-data tabs
             for i in range(1, 4):
                 self._tabs.setTabEnabled(i, False)
             
@@ -638,7 +647,7 @@ class MainWindow(QMainWindow):
             self._set_status("Session reset")
     
     def _on_switch_tab(self) -> None:
-        # switch tab from menu
+        # handle tab switch from menu action
         action = self.sender()
         index = action.data()
         self._switch_to_tab(index)
@@ -651,8 +660,7 @@ class MainWindow(QMainWindow):
     # ---------- WINDOW EVENTS ----------
     
     def closeEvent(self, event) -> None:
-        # handle window close
-        # check for unsaved work
+        # handle window close event
         if self._session.state.forecasts_generated:
             reply = QMessageBox.question(
                 self,
@@ -666,7 +674,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         
-        # cleanup
+        # run memory cleanup
         self._memory_manager.force_cleanup()
         
         event.accept()

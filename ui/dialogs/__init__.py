@@ -11,7 +11,7 @@ from .about_dialog import AboutDialog
 from .welcome_dialog import WelcomeDialog
 from .sheet_selection_dialog import SheetSelectionDialog
 from .abnormal_data_dialog import AbnormalDataDialog
-from .help_dialog import ClusterHelpDialog
+from .help_dialog import ClusterHelpDialog, ForecastHelpDialog, DataCleaningHelpDialog
 from .anomaly_chart_dialog import AnomalyChartDialog
 
 __all__ = [
@@ -24,5 +24,7 @@ __all__ = [
     "SheetSelectionDialog",
     "AbnormalDataDialog",
     "ClusterHelpDialog",
+    "ForecastHelpDialog",
+    "DataCleaningHelpDialog",
     "AnomalyChartDialog"
 ]

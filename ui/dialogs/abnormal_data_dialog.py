@@ -1,25 +1,24 @@
 """
 abnormal data dialog module
 displays abnormal data for review
-allows export to external applications
+allows fixes and export
 """
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QComboBox, QGroupBox, QMessageBox,
-    QFileDialog, QAbstractItemView, QTabWidget, QWidget,
-    QCheckBox
+    QHeaderView, QMessageBox, QFileDialog,
+    QAbstractItemView, QTabWidget, QWidget,
+    QGroupBox, QLineEdit, QCheckBox, QComboBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QBrush
 from typing import Dict, List, Any, Optional
 import pandas as pd
-import subprocess
-import os
-import tempfile
+import numpy as np
 
 import config
+from core.data_processor import DataProcessor
 
 
 # ============================================================================
@@ -27,272 +26,461 @@ import config
 # ============================================================================
 
 class AbnormalDataDialog(QDialog):
-    # dialog for viewing abnormal data
-    
-    # signals
-    fix_requested = pyqtSignal(str, dict)  # fix type, options
+    # dialog for viewing abnormal data and applying fixes
     
     def __init__(self, 
                  data: pd.DataFrame, 
                  column_mapping: Dict[str, str],
                  quality_info: Dict[str, Any],
-                 parent=None):
+                 parent=None,
+                 processor: Optional[DataProcessor] = None):
         # initialize dialog
         super().__init__(parent)
         
         self._data = data
         self._column_mapping = column_mapping
         self._quality_info = quality_info
-        self._abnormal_data = {}
+        self._processor = processor
+        
+        self._abnormal_data: Dict[str, Dict[str, Any]] = {}
+        self._tables: Dict[str, QTableWidget] = {}
+        self._type_order: List[str] = []
+        self._fix_controls: Dict[str, Dict[str, object]] = {}
         
         self._setup_ui()
         self._analyze_abnormal_data()
         self._populate_tabs()
+        self._setup_fix_controls()
     
     # ---------- UI SETUP ----------
     
     def _setup_ui(self) -> None:
-        # setup user interface
+        # setup main dialog ui
         self.setWindowTitle("Abnormal Data Review")
         self.setMinimumWidth(900)
         self.setMinimumHeight(600)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setSpacing(12)
         
         # header
         header = QLabel("Review Abnormal Data")
         header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
         
-        desc = QLabel("Below are the data quality issues detected. Select which issues to fix and export data for review.")
+        # description
+        desc = QLabel(
+            "These rows look unusual based on missing values, duplicates, negatives, or outliers.\n"
+            "You can search, apply fixes, or export full abnormal datasets."
+        )
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #666;")
         layout.addWidget(desc)
         
-        # tabs for different issue types
+        # search row
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("Filter rows in current tab preview...")
+        self._search_edit.textChanged.connect(self._apply_search_filter)
+        search_layout.addWidget(self._search_edit)
+        
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
+        
+        # abnormal tabs
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs)
         
-        # fix options section
-        fix_group = QGroupBox("Apply Fixes")
-        fix_layout = QVBoxLayout(fix_group)
+        # fix controls
+        self._fix_group = QGroupBox("Fix Abnormal Data")
+        fix_layout = QVBoxLayout(self._fix_group)
+        fix_layout.setSpacing(8)
         
-        fix_desc = QLabel("Select which issues to fix:")
+        fix_desc = QLabel("Select which issues to fix and how:")
+        fix_desc.setWordWrap(True)
+        fix_desc.setStyleSheet("color: #666;")
         fix_layout.addWidget(fix_desc)
         
-        # fix checkboxes
-        self._fix_checks = {}
-        fix_options = [
-            ("missing", "Fill missing values (forward fill)"),
-            ("duplicates", "Aggregate duplicate entries (sum quantities)"),
-            ("negative", "Fix negative values (set to zero)"),
-            ("outliers", "Remove statistical outliers")
-        ]
+        self._fix_rows_container = QWidget()
+        self._fix_rows_layout = QVBoxLayout(self._fix_rows_container)
+        self._fix_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._fix_rows_layout.setSpacing(6)
+        fix_layout.addWidget(self._fix_rows_container)
         
-        for key, label in fix_options:
-            check = QCheckBox(label)
-            check.setEnabled(False)  # enabled when issue exists
-            self._fix_checks[key] = check
-            fix_layout.addWidget(check)
+        layout.addWidget(self._fix_group)
         
-        # apply selected fixes button
-        fix_btn_layout = QHBoxLayout()
-        self._apply_fixes_btn = QPushButton("Apply Selected Fixes")
-        self._apply_fixes_btn.clicked.connect(self._apply_selected_fixes)
-        fix_btn_layout.addWidget(self._apply_fixes_btn)
-        fix_btn_layout.addStretch()
-        fix_layout.addLayout(fix_btn_layout)
+        # bottom buttons
+        bottom_layout = QHBoxLayout()
         
-        layout.addWidget(fix_group)
-        
-        # export buttons
-        export_layout = QHBoxLayout()
-        
-        export_layout.addWidget(QLabel("Export selected data:"))
-        
-        self._export_csv_btn = QPushButton("📄 Export to CSV")
+        self._export_csv_btn = QPushButton("📄 Export CSV")
         self._export_csv_btn.clicked.connect(lambda: self._export_data("csv"))
-        export_layout.addWidget(self._export_csv_btn)
+        bottom_layout.addWidget(self._export_csv_btn)
         
-        self._export_excel_btn = QPushButton("📊 Export to Excel")
+        self._export_excel_btn = QPushButton("📊 Export Excel")
         self._export_excel_btn.clicked.connect(lambda: self._export_data("excel"))
-        export_layout.addWidget(self._export_excel_btn)
+        bottom_layout.addWidget(self._export_excel_btn)
         
-        self._open_excel_btn = QPushButton("🔗 Open in Excel")
-        self._open_excel_btn.clicked.connect(self._open_in_excel)
-        export_layout.addWidget(self._open_excel_btn)
+        bottom_layout.addSpacing(20)
         
-        export_layout.addStretch()
-        layout.addLayout(export_layout)
+        self._apply_btn = QPushButton("Apply Fixes")
+        self._apply_btn.clicked.connect(self._apply_fixes)
+        bottom_layout.addWidget(self._apply_btn)
         
-        # close button
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
+        bottom_layout.addStretch()
         
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
-        button_layout.addWidget(close_btn)
+        bottom_layout.addWidget(close_btn)
         
-        layout.addLayout(button_layout)
+        layout.addLayout(bottom_layout)
     
-    # ---------- DATA ANALYSIS ----------
+    # ---------- ANALYSIS ----------
     
     def _analyze_abnormal_data(self) -> None:
-        # analyze and categorize abnormal data - only abnormal rows
+        # analyze abnormal rows by category
         df = self._data
         qty_col = self._column_mapping.get("quantity")
         date_col = self._column_mapping.get("date")
         sku_col = self._column_mapping.get("sku")
         
-        # missing values - only rows with missing in mapped columns
+        # missing values in mapped columns
         mapped_cols = [c for c in self._column_mapping.values() if c and c in df.columns]
         if mapped_cols:
-            missing_mask = df[mapped_cols].isnull().any(axis=1)
-            if missing_mask.any():
+            miss_mask = df[mapped_cols].isnull().any(axis=1)
+            if miss_mask.any():
                 self._abnormal_data["missing"] = {
                     "title": "Missing Values",
-                    "data": df[missing_mask][mapped_cols + [c for c in df.columns if c not in mapped_cols][:2]].copy(),
-                    "description": f"{missing_mask.sum():,} rows with missing values in key columns"
+                    "data": df[miss_mask].copy(),
+                    "description": f"{int(miss_mask.sum()):,} rows with missing values in key columns"
                 }
-                self._fix_checks["missing"].setEnabled(True)
         
-        # duplicates - only duplicate rows
+        # duplicates by sku + date
         if sku_col and date_col:
             dup_mask = df.duplicated(subset=[sku_col, date_col], keep=False)
             if dup_mask.any():
-                # only show relevant columns for duplicates
-                display_cols = [sku_col, date_col]
-                if qty_col:
-                    display_cols.append(qty_col)
-                
                 self._abnormal_data["duplicates"] = {
                     "title": "Duplicate Entries",
-                    "data": df[dup_mask][display_cols].sort_values([sku_col, date_col]).copy(),
-                    "description": f"{dup_mask.sum():,} duplicate rows (same item and date)"
+                    "data": df[dup_mask].copy(),
+                    "description": f"{int(dup_mask.sum()):,} rows with duplicate item and date"
                 }
-                self._fix_checks["duplicates"].setEnabled(True)
         
-        # negative values - only negative rows
+        # negative values
         if qty_col and qty_col in df.columns:
             neg_mask = df[qty_col] < 0
             if neg_mask.any():
-                # show only relevant columns
-                display_cols = [sku_col, date_col, qty_col] if sku_col and date_col else [qty_col]
-                display_cols = [c for c in display_cols if c and c in df.columns]
-                
                 self._abnormal_data["negative"] = {
                     "title": "Negative Values",
-                    "data": df[neg_mask][display_cols].copy(),
-                    "description": f"{neg_mask.sum():,} rows with negative quantities"
+                    "data": df[neg_mask].copy(),
+                    "description": f"{int(neg_mask.sum()):,} rows with negative quantities"
                 }
-                self._fix_checks["negative"].setEnabled(True)
         
-        # outliers using IQR - only outlier rows
+        # outliers by z-score
         if qty_col and qty_col in df.columns:
-            q1 = df[qty_col].quantile(0.25)
-            q3 = df[qty_col].quantile(0.75)
-            iqr = q3 - q1
-            
-            outlier_mask = (df[qty_col] < q1 - 1.5 * iqr) | (df[qty_col] > q3 + 1.5 * iqr)
-            if outlier_mask.any():
-                # show only relevant columns
-                display_cols = [sku_col, date_col, qty_col] if sku_col and date_col else [qty_col]
-                display_cols = [c for c in display_cols if c and c in df.columns]
-                
-                self._abnormal_data["outliers"] = {
-                    "title": "Statistical Outliers",
-                    "data": df[outlier_mask][display_cols].copy(),
-                    "description": f"{outlier_mask.sum():,} rows with outlier values (outside 1.5x IQR)"
-                }
-                self._fix_checks["outliers"].setEnabled(True)
+            vals = df[qty_col].astype(float)
+            mean = vals.mean()
+            std = vals.std()
+            if std and not np.isnan(std):
+                z = (vals - mean) / std
+                out_mask = (z > 3.0) | (z < -3.0)
+                if out_mask.any():
+                    self._abnormal_data["outliers"] = {
+                        "title": "Outliers",
+                        "data": df[out_mask].copy(),
+                        "description": f"{int(out_mask.sum()):,} rows with values outside 3 standard deviations"
+                    }
+    
+    # ---------- TABS ----------
     
     def _populate_tabs(self) -> None:
-        # populate tabs with abnormal data
+        # build tabs for each abnormal type
         if not self._abnormal_data:
-            # no abnormal data found
-            no_data = QWidget()
-            no_layout = QVBoxLayout(no_data)
-            no_label = QLabel("✓ No abnormal data detected!")
-            no_label.setFont(QFont("Segoe UI", 14))
-            no_label.setAlignment(Qt.AlignCenter)
-            no_label.setStyleSheet("color: #28A745;")
-            no_layout.addWidget(no_label)
-            self._tabs.addTab(no_data, "All Clear")
-            self._apply_fixes_btn.setEnabled(False)
+            empty = QWidget()
+            lay = QVBoxLayout(empty)
+            msg = QLabel("✓ No abnormal data detected!")
+            msg.setFont(QFont("Segoe UI", 14))
+            msg.setAlignment(Qt.AlignCenter)
+            msg.setStyleSheet("color: #28A745;")
+            lay.addWidget(msg)
+            self._tabs.addTab(empty, "All Clear")
+            self._fix_group.setEnabled(False)
+            self._export_csv_btn.setEnabled(False)
+            self._export_excel_btn.setEnabled(False)
+            self._apply_btn.setEnabled(False)
             return
         
         for key, info in self._abnormal_data.items():
-            tab = self._create_data_tab(info)
-            self._tabs.addTab(tab, f"{info['title']} ({len(info['data']):,})")
+            title = info["title"]
+            df = info["data"]
+            
+            tab = QWidget()
+            tab_layout = QVBoxLayout(tab)
+            tab_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # description label
+            desc = QLabel(info["description"])
+            desc.setStyleSheet("font-weight: bold; margin-bottom: 8px;")
+            tab_layout.addWidget(desc)
+            
+            # table without exclude column
+            table = QTableWidget()
+            table.setAlternatingRowColors(True)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.horizontalHeader().setStretchLastSection(True)
+            table.verticalHeader().setVisible(False)
+            table.setSortingEnabled(True)
+            
+            # preview first 1000 rows
+            preview = df.head(1000)
+            cols = list(preview.columns)
+            
+            # set columns without exclude checkbox
+            table.setColumnCount(len(cols))
+            headers = [str(c) for c in cols]
+            table.setHorizontalHeaderLabels(headers)
+            
+            table.setRowCount(len(preview))
+            
+            for row_idx, (orig_idx, row) in enumerate(preview.iterrows()):
+                for j, col in enumerate(cols):
+                    val = row[col]
+                    text = "" if pd.isna(val) else str(val)
+                    item = QTableWidgetItem(text)
+                    
+                    # highlight problematic cells
+                    if pd.isna(val):
+                        item.setBackground(QBrush(QColor("#FFCDD2")))
+                    elif isinstance(val, (int, float)) and val < 0:
+                        item.setBackground(QBrush(QColor("#FFCDD2")))
+                    
+                    table.setItem(row_idx, j, item)
+            
+            table.resizeColumnsToContents()
+            
+            tab_layout.addWidget(table)
+            
+            # info label for large datasets
+            if len(df) > len(preview):
+                info_label = QLabel(
+                    f"Showing first {len(preview):,} of {len(df):,} rows. "
+                    f"Export to CSV or Excel to see full abnormal dataset."
+                )
+                info_label.setStyleSheet("color: #666; font-style: italic;")
+                tab_layout.addWidget(info_label)
+            
+            self._tabs.addTab(tab, f"{title} ({len(df):,})")
+            self._tables[key] = table
+            self._type_order.append(key)
     
-    def _create_data_tab(self, info: Dict) -> QWidget:
-        # create tab for data category
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    # ---------- FIX CONTROLS ----------
+    
+    def _setup_fix_controls(self) -> None:
+        # build fix type controls
+        def add_fix_row(
+            key: str,
+            title: str,
+            description: str,
+            enabled: bool,
+            methods: List[tuple],
+            default_method: str
+        ) -> None:
+            row = QWidget()
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 6)
+            row_layout.setSpacing(2)
+            
+            # checkbox for fix type
+            chk = QCheckBox(title)
+            chk.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            chk.setEnabled(enabled)
+            chk.setChecked(enabled)
+            row_layout.addWidget(chk)
+            
+            # description
+            desc = QLabel(description)
+            desc.setStyleSheet("color: #666; margin-left: 20px; font-size: 9pt;")
+            desc.setWordWrap(True)
+            row_layout.addWidget(desc)
+            
+            # method selector
+            method_layout = QHBoxLayout()
+            method_layout.addSpacing(20)
+            method_layout.addWidget(QLabel("Method:"))
+            
+            combo = QComboBox()
+            for code, text in methods:
+                combo.addItem(text, code)
+            for idx in range(combo.count()):
+                if combo.itemData(idx) == default_method:
+                    combo.setCurrentIndex(idx)
+                    break
+            combo.setEnabled(enabled)
+            method_layout.addWidget(combo)
+            method_layout.addStretch()
+            
+            row_layout.addLayout(method_layout)
+            
+            self._fix_rows_layout.addWidget(row)
+            self._fix_controls[key] = {"check": chk, "combo": combo}
         
-        # description
-        desc = QLabel(info["description"])
-        desc.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
-        layout.addWidget(desc)
+        # missing values fix options
+        add_fix_row(
+            "missing",
+            "Missing values",
+            "Handle missing values in key columns.",
+            enabled=("missing" in self._abnormal_data),
+            methods=[
+                ("ffill", "Forward fill (previous value)"),
+                ("bfill", "Backward fill (next value)"),
+                ("zero", "Set missing to zero"),
+                ("mean", "Fill numeric with average"),
+                ("remove", "Remove rows with missing values")
+            ],
+            default_method="ffill"
+        )
         
-        # table
-        table = QTableWidget()
+        # duplicates
+        add_fix_row(
+            "duplicates",
+            "Duplicate entries",
+            "Handle rows with same item and date.",
+            enabled=("duplicates" in self._abnormal_data),
+            methods=[
+                ("sum", "Sum quantities"),
+                ("mean", "Average quantities"),
+                ("first", "Keep first entry")
+            ],
+            default_method="sum"
+        )
+        
+        # negative
+        add_fix_row(
+            "negative",
+            "Negative values",
+            "Handle negative quantities.",
+            enabled=("negative" in self._abnormal_data),
+            methods=[
+                ("zero", "Set to zero"),
+                ("absolute", "Use absolute value")
+            ],
+            default_method="zero"
+        )
+        
+        # outliers
+        add_fix_row(
+            "outliers",
+            "Outliers",
+            "Handle rows with extreme values.",
+            enabled=("outliers" in self._abnormal_data),
+            methods=[
+                ("remove", "Remove outlier rows"),
+                ("cap", "Cap values to threshold")
+            ],
+            default_method="remove"
+        )
+    
+    # ---------- SEARCH ----------
+    
+    def _apply_search_filter(self) -> None:
+        # filter preview rows in current tab
+        text = self._search_edit.text().lower().strip()
+        if not self._type_order:
+            return
+        
+        idx = self._tabs.currentIndex()
+        if idx < 0 or idx >= len(self._type_order):
+            return
+        
+        t_key = self._type_order[idx]
+        table = self._tables.get(t_key)
+        if table is None:
+            return
+        
+        for row in range(table.rowCount()):
+            if not text:
+                table.setRowHidden(row, False)
+                continue
+            
+            match = False
+            for col in range(table.columnCount()):
+                item = table.item(row, col)
+                if not item:
+                    continue
+                val = item.text().lower()
+                if text in val:
+                    match = True
+                    break
+            table.setRowHidden(row, not match)
+    
+    # ---------- EXPORT ----------
+    
+    def _get_current_type(self) -> Optional[str]:
+        # get key for current tab
+        idx = self._tabs.currentIndex()
+        if idx < 0 or idx >= len(self._type_order):
+            return None
+        return self._type_order[idx]
+    
+    def _export_data(self, fmt: str) -> None:
+        # export full abnormal dataset for current type
+        t_key = self._get_current_type()
+        if t_key is None:
+            return
+        
+        info = self._abnormal_data.get(t_key)
+        if not info:
+            QMessageBox.warning(self, "No Data", "No abnormal data to export")
+            return
+        
         df = info["data"]
+        if df.empty:
+            QMessageBox.warning(self, "No Data", "No abnormal data to export")
+            return
         
-        # limit display rows
-        display_df = df.head(1000)
+        if fmt == "csv":
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Abnormal Data to CSV",
+                f"abnormal_{t_key}.csv",
+                "CSV Files (*.csv)"
+            )
+            if not path:
+                return
+            df.to_csv(path, index=False)
+        else:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Abnormal Data to Excel",
+                f"abnormal_{t_key}.xlsx",
+                "Excel Files (*.xlsx)"
+            )
+            if not path:
+                return
+            df.to_excel(path, index=False, engine="openpyxl")
         
-        table.setRowCount(len(display_df))
-        table.setColumnCount(len(display_df.columns))
-        table.setHorizontalHeaderLabels([str(c) for c in display_df.columns])
-        table.setAlternatingRowColors(True)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.horizontalHeader().setStretchLastSection(True)
-        
-        for row_idx, (i, row) in enumerate(display_df.iterrows()):
-            for j, value in enumerate(row):
-                cell_text = str(value) if pd.notna(value) else ""
-                item = QTableWidgetItem(cell_text)
-                
-                # highlight abnormal cells
-                if pd.isna(value):
-                    item.setBackground(QBrush(QColor("#FFCDD2")))
-                elif isinstance(value, (int, float)) and value < 0:
-                    item.setBackground(QBrush(QColor("#FFCDD2")))
-                
-                table.setItem(row_idx, j, item)
-        
-        table.resizeColumnsToContents()
-        
-        layout.addWidget(table)
-        
-        # row count info
-        if len(df) > 1000:
-            info_label = QLabel(f"Showing first 1,000 of {len(df):,} rows. Export to view all.")
-            info_label.setStyleSheet("color: #666; font-style: italic;")
-            layout.addWidget(info_label)
-        
-        return widget
+        QMessageBox.information(self, "Export Complete", f"Exported to:\n{path}")
     
-    # ---------- FIX METHODS ----------
+    # ---------- APPLY FIXES ----------
     
-    def _apply_selected_fixes(self) -> None:
-        # apply selected fixes with confirmation
-        selected_fixes = []
-        fix_descriptions = {
-            "missing": "Fill missing values using forward fill",
-            "duplicates": "Aggregate duplicate entries by summing quantities",
-            "negative": "Set negative values to zero",
-            "outliers": "Remove rows with statistical outliers"
-        }
+    def _apply_fixes(self) -> None:
+        # apply selected fixes to processor data
+        if self._processor is None or self._processor.processed_data is None:
+            QMessageBox.warning(self, "No Data", "No processed data to fix")
+            return
         
-        for key, check in self._fix_checks.items():
-            if check.isEnabled() and check.isChecked():
-                selected_fixes.append((key, fix_descriptions.get(key, key)))
+        # collect selected fixes
+        fix_specs: List[tuple] = []
+        for key, ctrl in self._fix_controls.items():
+            chk: QCheckBox = ctrl["check"]
+            combo: QComboBox = ctrl["combo"]
+            if chk.isEnabled() and chk.isChecked():
+                method = combo.currentData()
+                fix_specs.append((key, method))
         
-        if not selected_fixes:
+        if not fix_specs:
             QMessageBox.information(
                 self,
                 "No Fixes Selected",
@@ -300,95 +488,85 @@ class AbnormalDataDialog(QDialog):
             )
             return
         
-        # build confirmation message
-        fix_list = "\n".join([f"• {desc}" for _, desc in selected_fixes])
+        # description mapping for confirmation
+        desc_map = {
+            "missing": {
+                "ffill": "fill missing with previous values",
+                "bfill": "fill missing with next values",
+                "zero": "set missing to zero",
+                "mean": "fill missing numeric values with averages",
+                "remove": "remove rows with missing values"
+            },
+            "duplicates": {
+                "sum": "sum duplicate quantities",
+                "mean": "average duplicate quantities",
+                "first": "keep first duplicate row"
+            },
+            "negative": {
+                "zero": "set negative quantities to zero",
+                "absolute": "use absolute value of negative quantities"
+            },
+            "outliers": {
+                "remove": "remove rows with outlier quantities",
+                "cap": "cap outlier quantities to threshold"
+            }
+        }
+        
+        lines = []
+        for f_type, method in fix_specs:
+            txt = desc_map.get(f_type, {}).get(method, f"{f_type} ({method})")
+            lines.append(f"• {txt}")
+        
+        msg = "\n".join(lines)
         
         reply = QMessageBox.question(
             self,
             "Confirm Fixes",
-            f"The following fixes will be applied:\n\n{fix_list}\n\n"
-            "This will modify your data. Continue?",
+            f"The following fixes will be applied:\n\n{msg}\n\n"
+            "This will modify your loaded data. Continue?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
-        if reply == QMessageBox.Yes:
-            # emit signal for each selected fix
-            for fix_key, _ in selected_fixes:
-                self.fix_requested.emit(fix_key, {})
+        if reply != QMessageBox.Yes:
+            return
+        
+        # apply each fix
+        applied_msgs: List[str] = []
+        for f_type, method in fix_specs:
+            if f_type == "missing":
+                ok, m = self._processor.apply_fix(
+                    "fill_missing", method=method
+                )
+            elif f_type == "duplicates":
+                ok, m = self._processor.apply_fix(
+                    "remove_duplicates", method=method
+                )
+            elif f_type == "negative":
+                ok, m = self._processor.apply_fix(
+                    "fix_negatives", method=method
+                )
+            elif f_type == "outliers":
+                ok, m = self._processor.apply_fix(
+                    "remove_outliers", method=method, threshold=3.0
+                )
+            else:
+                ok, m = False, f"unknown fix type: {f_type}"
             
+            if ok:
+                applied_msgs.append(m)
+        
+        if not applied_msgs:
             QMessageBox.information(
                 self,
-                "Fixes Applied",
-                f"Applied {len(selected_fixes)} fix(es) to your data.\n"
-                "Close this dialog to see updated quality metrics."
+                "No Fixes Applied",
+                "No fixes were successfully applied."
             )
-            self.accept()
-    
-    def get_selected_fixes(self) -> List[str]:
-        # get list of selected fix types
-        return [key for key, check in self._fix_checks.items() 
-                if check.isEnabled() and check.isChecked()]
-    
-    # ---------- EXPORT METHODS ----------
-    
-    def _get_current_data(self) -> Optional[pd.DataFrame]:
-        # get data from current tab
-        current_idx = self._tabs.currentIndex()
-        
-        if current_idx < 0:
-            return None
-        
-        keys = list(self._abnormal_data.keys())
-        if current_idx < len(keys):
-            return self._abnormal_data[keys[current_idx]]["data"]
-        
-        return None
-    
-    def _export_data(self, format_type: str) -> None:
-        # export current tab data
-        df = self._get_current_data()
-        
-        if df is None or df.empty:
-            QMessageBox.warning(self, "No Data", "No data to export")
             return
         
-        if format_type == "csv":
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Export to CSV", "abnormal_data.csv", "CSV Files (*.csv)"
-            )
-            if path:
-                df.to_csv(path, index=False)
-                QMessageBox.information(self, "Export Complete", f"Exported to:\n{path}")
+        text = "Applied the following fixes:\n" + "\n".join(
+            [f"• {m}" for m in applied_msgs]
+        )
+        QMessageBox.information(self, "Fixes Applied", text)
         
-        elif format_type == "excel":
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Export to Excel", "abnormal_data.xlsx", "Excel Files (*.xlsx)"
-            )
-            if path:
-                df.to_excel(path, index=False, engine="openpyxl")
-                QMessageBox.information(self, "Export Complete", f"Exported to:\n{path}")
-    
-    def _open_in_excel(self) -> None:
-        # export to temp file and open in excel
-        df = self._get_current_data()
-        
-        if df is None or df.empty:
-            QMessageBox.warning(self, "No Data", "No data to open")
-            return
-        
-        try:
-            # create temp file
-            fd, path = tempfile.mkstemp(suffix=".xlsx")
-            os.close(fd)
-            
-            df.to_excel(path, index=False, engine="openpyxl")
-            
-            # open with default application
-            if os.name == "nt":  # windows
-                os.startfile(path)
-            elif os.name == "posix":  # mac/linux
-                subprocess.run(["open" if os.uname().sysname == "Darwin" else "xdg-open", path])
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to open in Excel:\n{str(e)}")
+        self.accept()

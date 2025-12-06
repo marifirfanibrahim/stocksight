@@ -87,7 +87,7 @@ class DataProcessor:
             # use chunked reading for large files
             chunks = []
             chunk_size = config.PERFORMANCE["chunk_size"] * 100
-            total_chunks = int(size_mb / 10) + 1  # estimate
+            total_chunks = int(size_mb / 10) + 1
             
             for i, chunk in enumerate(pd.read_csv(path, chunksize=chunk_size)):
                 chunks.append(chunk)
@@ -109,11 +109,8 @@ class DataProcessor:
         if progress_callback:
             progress_callback(50, "parsing excel")
         
-        # if sheet name provided, load that sheet
         if sheet_name:
             return pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
-        
-        # otherwise load first sheet (default behavior)
         return pd.read_excel(path, engine="openpyxl")
     
     def _load_parquet(self, path: Path, progress_callback: Optional[callable] = None) -> pd.DataFrame:
@@ -133,25 +130,15 @@ class DataProcessor:
             return {}
         
         try:
-            # read excel file to get sheet names
             xlsx = pd.ExcelFile(path, engine="openpyxl")
             sheet_info = {}
             
             for sheet_name in xlsx.sheet_names:
-                # get row count without loading entire sheet
                 try:
-                    # read just header to get structure
-                    df_sample = pd.read_excel(
-                        xlsx, 
-                        sheet_name=sheet_name, 
-                        nrows=0
-                    )
-                    
-                    # count rows efficiently
                     df_count = pd.read_excel(
                         xlsx,
                         sheet_name=sheet_name,
-                        usecols=[0]  # only first column
+                        usecols=[0]
                     )
                     sheet_info[sheet_name] = len(df_count)
                 except Exception:
@@ -191,10 +178,9 @@ class DataProcessor:
             if progress_callback:
                 progress_callback(10, "starting processing")
             
-            # create copy for processing
             df = self.raw_data.copy()
             
-            # process date column
+            # date column
             date_col = self.column_mapping.get("date")
             if date_col:
                 if progress_callback:
@@ -203,14 +189,14 @@ class DataProcessor:
                 df = df.dropna(subset=[date_col])
                 df = df.sort_values(date_col)
             
-            # process quantity column
+            # quantity column
             qty_col = self.column_mapping.get("quantity")
             if qty_col:
                 if progress_callback:
                     progress_callback(40, "processing quantities")
                 df[qty_col] = pd.to_numeric(df[qty_col], errors="coerce")
             
-            # process sku column
+            # sku column
             sku_col = self.column_mapping.get("sku")
             if sku_col:
                 if progress_callback:
@@ -218,7 +204,7 @@ class DataProcessor:
                 df[sku_col] = df[sku_col].astype(str).str.strip()
                 self.sku_list = df[sku_col].unique().tolist()
             
-            # process category column
+            # category column
             cat_col = self.column_mapping.get("category")
             if cat_col:
                 if progress_callback:
@@ -226,19 +212,19 @@ class DataProcessor:
                 df[cat_col] = df[cat_col].astype(str).str.strip()
                 self.category_list = df[cat_col].unique().tolist()
             elif sku_col:
-                # create category from sku prefix
+                # auto category from sku prefix
                 df["auto_category"] = df[sku_col].str[:3]
                 self.column_mapping["category"] = "auto_category"
                 self.category_list = df["auto_category"].unique().tolist()
             
-            # process price column if exists
+            # price column
             price_col = self.column_mapping.get("price")
             if price_col:
                 if progress_callback:
                     progress_callback(80, "processing prices")
                 df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
             
-            # process promo column if exists
+            # promo column
             promo_col = self.column_mapping.get("promo")
             if promo_col:
                 if progress_callback:
@@ -273,7 +259,7 @@ class DataProcessor:
         if progress_callback:
             progress_callback(20, "checking missing values")
         
-        # check missing values
+        # missing values
         missing_pct = (df.isnull().sum().sum() / df.size) * 100
         quality["metrics"]["missing_data"] = {
             "value": missing_pct,
@@ -287,7 +273,7 @@ class DataProcessor:
         if progress_callback:
             progress_callback(40, "checking duplicates")
         
-        # check duplicates
+        # duplicates
         sku_col = self.column_mapping.get("sku")
         date_col = self.column_mapping.get("date")
         if sku_col and date_col:
@@ -305,7 +291,7 @@ class DataProcessor:
         if progress_callback:
             progress_callback(60, "checking negative values")
         
-        # check negative values
+        # negative values
         qty_col = self.column_mapping.get("quantity")
         if qty_col:
             neg_count = (df[qty_col] < 0).sum()
@@ -322,7 +308,7 @@ class DataProcessor:
         if progress_callback:
             progress_callback(80, "checking data coverage")
         
-        # check data coverage
+        # data coverage
         if date_col and sku_col:
             date_range = (df[date_col].max() - df[date_col].min()).days
             points_per_sku = len(df) / len(self.sku_list) if self.sku_list else 0
@@ -332,13 +318,14 @@ class DataProcessor:
                 "status": "good" if points_per_sku >= 12 else "warning" if points_per_sku >= 7 else "critical"
             }
             if points_per_sku < config.DATA_QUALITY["min_data_points"]:
-                quality["issues"].append(f"low data points per item: {points_per_sku:.1f} (minimum recommended: {config.DATA_QUALITY['min_data_points']})")
+                quality["issues"].append(
+                    f"low data points per item: {points_per_sku:.1f} "
+                    f"(minimum recommended: {config.DATA_QUALITY['min_data_points']})"
+                )
                 quality["recommendations"].append("consider weekly or monthly aggregation")
                 quality["overall_score"] -= 10
         
-        # ensure score is in valid range
         quality["overall_score"] = max(0, min(100, quality["overall_score"]))
-        
         self.data_quality = quality
         
         if progress_callback:
@@ -348,7 +335,9 @@ class DataProcessor:
     
     # ---------- DATA CLEANING ----------
     
-    def apply_fix(self, fix_type: str, progress_callback: Optional[callable] = None, **kwargs) -> Tuple[bool, str]:
+    def apply_fix(self, fix_type: str,
+                  progress_callback: Optional[callable] = None,
+                  **kwargs) -> Tuple[bool, str]:
         # apply data fix based on type
         if self.processed_data is None:
             return False, "no data to fix"
@@ -357,34 +346,53 @@ class DataProcessor:
             df = self.processed_data
             
             if fix_type == "fill_missing":
+                # handle different missing value strategies
                 if progress_callback:
                     progress_callback(50, "filling missing values")
                 method = kwargs.get("method", "ffill")
-                df = df.fillna(method=method)
+                
+                if method in ("ffill", "bfill"):
+                    df = df.fillna(method=method)
+                elif method == "zero":
+                    df = df.fillna(0)
+                elif method == "mean":
+                    num_cols = df.select_dtypes(include=["number"]).columns
+                    if len(num_cols) > 0:
+                        df[num_cols] = df[num_cols].fillna(df[num_cols].mean())
+                    else:
+                        df = df.fillna(0)
+                else:
+                    df = df.fillna(method="ffill")
+                
                 self.processed_data = df
-                return True, "filled missing values"
+                return True, f"filled missing values using {method} method"
             
             elif fix_type == "remove_duplicates":
+                # aggregate duplicates with chosen method
                 if progress_callback:
                     progress_callback(50, "removing duplicates")
                 sku_col = self.column_mapping.get("sku")
                 date_col = self.column_mapping.get("date")
                 qty_col = self.column_mapping.get("quantity")
                 
+                method = kwargs.get("method", "sum")
+                
                 if sku_col and date_col and qty_col:
-                    # aggregate duplicates
-                    agg_dict = {qty_col: "sum"}
-                    # include other columns
-                    for col in df.columns:
-                        if col not in [sku_col, date_col, qty_col]:
-                            agg_dict[col] = "first"
+                    if method == "first":
+                        df = df.drop_duplicates(subset=[sku_col, date_col], keep="first")
+                    else:
+                        agg_dict = {qty_col: method if method in ("sum", "mean") else "sum"}
+                        for col in df.columns:
+                            if col not in [sku_col, date_col, qty_col]:
+                                agg_dict[col] = "first"
+                        df = df.groupby([sku_col, date_col]).agg(agg_dict).reset_index()
                     
-                    df = df.groupby([sku_col, date_col]).agg(agg_dict).reset_index()
                     self.processed_data = df
-                    return True, "aggregated duplicate entries"
+                    return True, f"handled duplicate entries using {method} method"
                 return False, "required columns not mapped"
             
             elif fix_type == "fix_negatives":
+                # handle negative quantities
                 if progress_callback:
                     progress_callback(50, "fixing negative values")
                 qty_col = self.column_mapping.get("quantity")
@@ -400,21 +408,33 @@ class DataProcessor:
                 return False, "quantity column not mapped"
             
             elif fix_type == "remove_outliers":
+                # handle outliers based on z score
                 if progress_callback:
-                    progress_callback(50, "removing outliers")
+                    progress_callback(50, "handling outliers")
                 qty_col = self.column_mapping.get("quantity")
                 threshold = kwargs.get("threshold", 3.0)
+                method = kwargs.get("method", "remove")
                 
                 if qty_col:
                     mean = df[qty_col].mean()
                     std = df[qty_col].std()
+                    if std == 0 or np.isnan(std):
+                        return False, "cannot detect outliers due to zero variance"
+                    
                     lower = mean - threshold * std
                     upper = mean + threshold * std
                     
-                    outlier_count = ((df[qty_col] < lower) | (df[qty_col] > upper)).sum()
-                    df = df[(df[qty_col] >= lower) & (df[qty_col] <= upper)]
+                    mask = (df[qty_col] < lower) | (df[qty_col] > upper)
+                    outlier_count = int(mask.sum())
+                    
+                    if method == "cap":
+                        df.loc[df[qty_col] < lower, qty_col] = lower
+                        df.loc[df[qty_col] > upper, qty_col] = upper
+                    else:
+                        df = df[~mask]
+                    
                     self.processed_data = df
-                    return True, f"removed {outlier_count:,} outliers"
+                    return True, f"processed {outlier_count:,} outliers using {method} method"
                 return False, "quantity column not mapped"
             
             else:
@@ -426,7 +446,7 @@ class DataProcessor:
     # ---------- SKU CLASSIFICATION ----------
     
     def classify_skus(self, progress_callback: Optional[callable] = None) -> Dict[str, List[str]]:
-        # classify skus into a b c categories using pareto principle
+        # classify skus into abc tiers
         if self.processed_data is None:
             return {"A": [], "B": [], "C": []}
         
@@ -439,23 +459,20 @@ class DataProcessor:
         if progress_callback:
             progress_callback(30, "calculating volumes")
         
-        # calculate total volume per sku
         sku_volume = self.processed_data.groupby(sku_col)[qty_col].sum().sort_values(ascending=False)
         
         if progress_callback:
             progress_callback(60, "classifying items")
         
-        # calculate cumulative percentage
         total_volume = sku_volume.sum()
         cumulative_pct = (sku_volume.cumsum() / total_volume * 100).values
         
-        # classify based on cumulative contribution
         a_threshold = config.CLUSTERING["volume_percentiles"]["A"]
         b_threshold = config.CLUSTERING["volume_percentiles"]["B"]
         
         classification = {"A": [], "B": [], "C": []}
         
-        for i, (sku, volume) in enumerate(sku_volume.items()):
+        for i, (sku, _) in enumerate(sku_volume.items()):
             if cumulative_pct[i] <= a_threshold:
                 classification["A"].append(sku)
             elif cumulative_pct[i] <= a_threshold + b_threshold:
@@ -471,7 +488,7 @@ class DataProcessor:
     # ---------- DATA ACCESS ----------
     
     def get_sku_data(self, sku: str) -> pd.DataFrame:
-        # get time series data for single sku
+        # get time series for sku
         if self.processed_data is None:
             return pd.DataFrame()
         
@@ -482,7 +499,7 @@ class DataProcessor:
         return self.processed_data[self.processed_data[sku_col] == sku].copy()
     
     def get_sku_sample(self, n: int = 20, stratified: bool = True) -> List[str]:
-        # get sample of skus for visualization
+        # sample skus for visualization
         if not self.sku_list:
             return []
         
@@ -490,23 +507,24 @@ class DataProcessor:
             return self.sku_list.copy()
         
         if stratified:
-            # sample from each abc category
             classification = self.classify_skus()
             sample = []
-            per_class = n // 3
+            per_class = max(1, n // 3)
             
             for tier in ["A", "B", "C"]:
                 tier_skus = classification[tier]
                 if tier_skus:
                     sample_size = min(per_class, len(tier_skus))
-                    sample.extend(np.random.choice(tier_skus, sample_size, replace=False).tolist())
+                    sample.extend(
+                        np.random.choice(tier_skus, sample_size, replace=False).tolist()
+                    )
             
             return sample[:n]
         else:
             return np.random.choice(self.sku_list, n, replace=False).tolist()
     
     def get_summary_stats(self) -> Dict[str, Any]:
-        # get summary statistics for loaded data
+        # get summary statistics
         if self.processed_data is None:
             return {}
         
@@ -514,7 +532,7 @@ class DataProcessor:
         date_col = self.column_mapping.get("date")
         qty_col = self.column_mapping.get("quantity")
         
-        stats = {
+        stats: Dict[str, Any] = {
             "total_rows": len(df),
             "total_skus": len(self.sku_list),
             "total_categories": len(self.category_list),
