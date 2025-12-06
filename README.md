@@ -134,5 +134,12 @@ The objectives of this application is to be/use:
 
 1. **Clone or copy the repository** so you have the `stocksight` folder.
 
-2. **Install dependencies** by `pip install -r requirements.txt` 
+2. **Install dependencies:**
+```Bash
+pip install -r requirements.txt
+```
 
+3. **Run the application:**
+```Bash
+python main.py
+```
