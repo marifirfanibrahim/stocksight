@@ -1,7 +1,7 @@
 # StockSight
 
 It is a desktop application for inventory **demand forecasting**.  
-It aims to helps you go from raw transactional data to forecasts and exports in **under 30 minutes**, even for **10,000+ SKUs**.
+It aims to helps you go from raw transactional data to forecasts and exports **fast**, even for **10,000+ SKUs**.
 
 ---
 
@@ -135,3 +135,4 @@ The objectives of this application is to be/use:
 1. **Clone or copy the repository** so you have the `stocksight` folder.
 
 2. **Install dependencies** by `pip install -r requirements.txt` 
+
