@@ -8,9 +8,10 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QComboBox, QGroupBox, QMessageBox,
-    QFileDialog, QAbstractItemView, QTabWidget, QWidget
+    QFileDialog, QAbstractItemView, QTabWidget, QWidget,
+    QCheckBox
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QBrush
 from typing import Dict, List, Any, Optional
 import pandas as pd
@@ -27,6 +28,9 @@ import config
 
 class AbnormalDataDialog(QDialog):
     # dialog for viewing abnormal data
+    
+    # signals
+    fix_requested = pyqtSignal(str, dict)  # fix type, options
     
     def __init__(self, 
                  data: pd.DataFrame, 
@@ -62,7 +66,7 @@ class AbnormalDataDialog(QDialog):
         header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
         
-        desc = QLabel("Below are the data quality issues detected. You can export any of these to review in Excel or other applications.")
+        desc = QLabel("Below are the data quality issues detected. Select which issues to fix and export data for review.")
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #666;")
         layout.addWidget(desc)
@@ -70,6 +74,38 @@ class AbnormalDataDialog(QDialog):
         # tabs for different issue types
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs)
+        
+        # fix options section
+        fix_group = QGroupBox("Apply Fixes")
+        fix_layout = QVBoxLayout(fix_group)
+        
+        fix_desc = QLabel("Select which issues to fix:")
+        fix_layout.addWidget(fix_desc)
+        
+        # fix checkboxes
+        self._fix_checks = {}
+        fix_options = [
+            ("missing", "Fill missing values (forward fill)"),
+            ("duplicates", "Aggregate duplicate entries (sum quantities)"),
+            ("negative", "Fix negative values (set to zero)"),
+            ("outliers", "Remove statistical outliers")
+        ]
+        
+        for key, label in fix_options:
+            check = QCheckBox(label)
+            check.setEnabled(False)  # enabled when issue exists
+            self._fix_checks[key] = check
+            fix_layout.addWidget(check)
+        
+        # apply selected fixes button
+        fix_btn_layout = QHBoxLayout()
+        self._apply_fixes_btn = QPushButton("Apply Selected Fixes")
+        self._apply_fixes_btn.clicked.connect(self._apply_selected_fixes)
+        fix_btn_layout.addWidget(self._apply_fixes_btn)
+        fix_btn_layout.addStretch()
+        fix_layout.addLayout(fix_btn_layout)
+        
+        layout.addWidget(fix_group)
         
         # export buttons
         export_layout = QHBoxLayout()
@@ -104,56 +140,56 @@ class AbnormalDataDialog(QDialog):
     # ---------- DATA ANALYSIS ----------
     
     def _analyze_abnormal_data(self) -> None:
-        # analyze and categorize abnormal data
+        # analyze and categorize abnormal data - only abnormal rows
         df = self._data
         qty_col = self._column_mapping.get("quantity")
         date_col = self._column_mapping.get("date")
         sku_col = self._column_mapping.get("sku")
         
-        # missing values
-        missing_mask = df.isnull().any(axis=1)
-        if missing_mask.any():
-            self._abnormal_data["missing"] = {
-                "title": "Missing Values",
-                "data": df[missing_mask].copy(),
-                "description": f"{missing_mask.sum():,} rows with missing values"
-            }
+        # missing values - only rows with missing in mapped columns
+        mapped_cols = [c for c in self._column_mapping.values() if c and c in df.columns]
+        if mapped_cols:
+            missing_mask = df[mapped_cols].isnull().any(axis=1)
+            if missing_mask.any():
+                self._abnormal_data["missing"] = {
+                    "title": "Missing Values",
+                    "data": df[missing_mask][mapped_cols + [c for c in df.columns if c not in mapped_cols][:2]].copy(),
+                    "description": f"{missing_mask.sum():,} rows with missing values in key columns"
+                }
+                self._fix_checks["missing"].setEnabled(True)
         
-        # duplicates
+        # duplicates - only duplicate rows
         if sku_col and date_col:
             dup_mask = df.duplicated(subset=[sku_col, date_col], keep=False)
             if dup_mask.any():
+                # only show relevant columns for duplicates
+                display_cols = [sku_col, date_col]
+                if qty_col:
+                    display_cols.append(qty_col)
+                
                 self._abnormal_data["duplicates"] = {
                     "title": "Duplicate Entries",
-                    "data": df[dup_mask].sort_values([sku_col, date_col]).copy(),
-                    "description": f"{dup_mask.sum():,} duplicate rows"
+                    "data": df[dup_mask][display_cols].sort_values([sku_col, date_col]).copy(),
+                    "description": f"{dup_mask.sum():,} duplicate rows (same item and date)"
                 }
+                self._fix_checks["duplicates"].setEnabled(True)
         
-        # negative values
+        # negative values - only negative rows
         if qty_col and qty_col in df.columns:
             neg_mask = df[qty_col] < 0
             if neg_mask.any():
+                # show only relevant columns
+                display_cols = [sku_col, date_col, qty_col] if sku_col and date_col else [qty_col]
+                display_cols = [c for c in display_cols if c and c in df.columns]
+                
                 self._abnormal_data["negative"] = {
                     "title": "Negative Values",
-                    "data": df[neg_mask].copy(),
+                    "data": df[neg_mask][display_cols].copy(),
                     "description": f"{neg_mask.sum():,} rows with negative quantities"
                 }
+                self._fix_checks["negative"].setEnabled(True)
         
-        # zero values (potential issues)
-        if qty_col and qty_col in df.columns:
-            zero_mask = df[qty_col] == 0
-            zero_count = zero_mask.sum()
-            zero_pct = (zero_count / len(df)) * 100
-            
-            # only flag if significant percentage
-            if zero_pct > 10:
-                self._abnormal_data["zeros"] = {
-                    "title": "Zero Values",
-                    "data": df[zero_mask].copy(),
-                    "description": f"{zero_count:,} rows ({zero_pct:.1f}%) with zero quantities"
-                }
-        
-        # outliers using IQR
+        # outliers using IQR - only outlier rows
         if qty_col and qty_col in df.columns:
             q1 = df[qty_col].quantile(0.25)
             q3 = df[qty_col].quantile(0.75)
@@ -161,11 +197,16 @@ class AbnormalDataDialog(QDialog):
             
             outlier_mask = (df[qty_col] < q1 - 1.5 * iqr) | (df[qty_col] > q3 + 1.5 * iqr)
             if outlier_mask.any():
+                # show only relevant columns
+                display_cols = [sku_col, date_col, qty_col] if sku_col and date_col else [qty_col]
+                display_cols = [c for c in display_cols if c and c in df.columns]
+                
                 self._abnormal_data["outliers"] = {
                     "title": "Statistical Outliers",
-                    "data": df[outlier_mask].copy(),
-                    "description": f"{outlier_mask.sum():,} rows with outlier values (IQR method)"
+                    "data": df[outlier_mask][display_cols].copy(),
+                    "description": f"{outlier_mask.sum():,} rows with outlier values (outside 1.5x IQR)"
                 }
+                self._fix_checks["outliers"].setEnabled(True)
     
     def _populate_tabs(self) -> None:
         # populate tabs with abnormal data
@@ -179,6 +220,7 @@ class AbnormalDataDialog(QDialog):
             no_label.setStyleSheet("color: #28A745;")
             no_layout.addWidget(no_label)
             self._tabs.addTab(no_data, "All Clear")
+            self._apply_fixes_btn.setEnabled(False)
             return
         
         for key, info in self._abnormal_data.items():
@@ -209,7 +251,7 @@ class AbnormalDataDialog(QDialog):
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.horizontalHeader().setStretchLastSection(True)
         
-        for i, row in display_df.iterrows():
+        for row_idx, (i, row) in enumerate(display_df.iterrows()):
             for j, value in enumerate(row):
                 cell_text = str(value) if pd.notna(value) else ""
                 item = QTableWidgetItem(cell_text)
@@ -220,7 +262,7 @@ class AbnormalDataDialog(QDialog):
                 elif isinstance(value, (int, float)) and value < 0:
                     item.setBackground(QBrush(QColor("#FFCDD2")))
                 
-                table.setItem(i if isinstance(i, int) else display_df.index.get_loc(i), j, item)
+                table.setItem(row_idx, j, item)
         
         table.resizeColumnsToContents()
         
@@ -233,6 +275,60 @@ class AbnormalDataDialog(QDialog):
             layout.addWidget(info_label)
         
         return widget
+    
+    # ---------- FIX METHODS ----------
+    
+    def _apply_selected_fixes(self) -> None:
+        # apply selected fixes with confirmation
+        selected_fixes = []
+        fix_descriptions = {
+            "missing": "Fill missing values using forward fill",
+            "duplicates": "Aggregate duplicate entries by summing quantities",
+            "negative": "Set negative values to zero",
+            "outliers": "Remove rows with statistical outliers"
+        }
+        
+        for key, check in self._fix_checks.items():
+            if check.isEnabled() and check.isChecked():
+                selected_fixes.append((key, fix_descriptions.get(key, key)))
+        
+        if not selected_fixes:
+            QMessageBox.information(
+                self,
+                "No Fixes Selected",
+                "Please select at least one fix to apply."
+            )
+            return
+        
+        # build confirmation message
+        fix_list = "\n".join([f"• {desc}" for _, desc in selected_fixes])
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirm Fixes",
+            f"The following fixes will be applied:\n\n{fix_list}\n\n"
+            "This will modify your data. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # emit signal for each selected fix
+            for fix_key, _ in selected_fixes:
+                self.fix_requested.emit(fix_key, {})
+            
+            QMessageBox.information(
+                self,
+                "Fixes Applied",
+                f"Applied {len(selected_fixes)} fix(es) to your data.\n"
+                "Close this dialog to see updated quality metrics."
+            )
+            self.accept()
+    
+    def get_selected_fixes(self) -> List[str]:
+        # get list of selected fix types
+        return [key for key, check in self._fix_checks.items() 
+                if check.isEnabled() and check.isChecked()]
     
     # ---------- EXPORT METHODS ----------
     

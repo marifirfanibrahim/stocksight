@@ -8,11 +8,12 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFrame, QProgressBar,
     QScrollArea, QSplitter, QFileDialog, QMessageBox,
-    QGridLayout, QListWidget, QListWidgetItem
+    QGridLayout, QListWidget, QListWidgetItem, QCheckBox,
+    QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QDragEnterEvent, QDropEvent, QColor
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import os
 
 import config
@@ -37,6 +38,7 @@ class DataTab(QWidget):
     data_loaded = pyqtSignal(dict)
     data_processed = pyqtSignal()
     proceed_requested = pyqtSignal()
+    sku_flagged = pyqtSignal(str)  # signal when sku flagged, no tab change
     
     def __init__(self, session_model, parent=None):
         # initialize tab
@@ -289,9 +291,9 @@ class DataTab(QWidget):
         self._view_abnormal_btn.clicked.connect(self._view_abnormal_data)
         action_layout.addWidget(self._view_abnormal_btn)
         
-        self._fix_btn = QPushButton("🔧 Apply Recommended Fixes")
+        self._fix_btn = QPushButton("🔧 Apply Fixes...")
         self._fix_btn.setEnabled(False)
-        self._fix_btn.clicked.connect(self._apply_fixes)
+        self._fix_btn.clicked.connect(self._show_fix_dialog)
         action_layout.addWidget(self._fix_btn)
         
         action_layout.addStretch()
@@ -631,37 +633,79 @@ class DataTab(QWidget):
             self._current_quality,
             self
         )
+        
+        # connect fix signal
+        dialog.fix_requested.connect(self._apply_single_fix)
+        
         dialog.exec_()
     
-    def _apply_fixes(self) -> None:
-        # apply recommended data fixes
+    def _show_fix_dialog(self) -> None:
+        # show dialog to choose which fixes to apply
+        if self._processor.processed_data is None:
+            return
+        
+        # create fix selection dialog
+        dialog = FixSelectionDialog(self._current_quality, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            selected_fixes = dialog.get_selected_fixes()
+            if selected_fixes:
+                self._apply_selected_fixes(selected_fixes)
+    
+    def _apply_single_fix(self, fix_type: str, options: Dict) -> None:
+        # apply a single fix type
+        self._apply_selected_fixes([fix_type])
+    
+    def _apply_selected_fixes(self, fix_types: List[str]) -> None:
+        # apply selected data fixes with confirmation
+        if not fix_types:
+            return
+        
+        # build fix descriptions
+        fix_descriptions = {
+            "missing": "Fill missing values using forward fill",
+            "duplicates": "Aggregate duplicate entries by summing quantities",
+            "negative": "Set negative values to zero",
+            "outliers": "Remove rows with statistical outliers"
+        }
+        
+        fix_list = "\n".join([f"• {fix_descriptions.get(f, f)}" for f in fix_types])
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirm Fixes",
+            f"The following fixes will be applied:\n\n{fix_list}\n\n"
+            "This will modify your data. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
         fixes_applied = []
         
-        # get current quality issues
-        quality = self._processor.data_quality
-        issues = quality.get("issues", [])
-        
-        # apply fixes based on issues found
-        for issue in issues:
-            issue_lower = issue.lower()
-            
-            # check for missing values
-            if "missing" in issue_lower:
+        # apply each fix
+        for fix_type in fix_types:
+            if fix_type == "missing":
                 success, msg = self._processor.apply_fix("fill_missing", method="ffill")
                 if success:
                     fixes_applied.append("Filled missing values")
             
-            # check for duplicates
-            elif "duplicate" in issue_lower:
+            elif fix_type == "duplicates":
                 success, msg = self._processor.apply_fix("remove_duplicates")
                 if success:
-                    fixes_applied.append("Removed duplicate entries")
+                    fixes_applied.append("Aggregated duplicate entries")
             
-            # check for negative values
-            elif "negative" in issue_lower:
+            elif fix_type == "negative":
                 success, msg = self._processor.apply_fix("fix_negatives", method="zero")
                 if success:
                     fixes_applied.append("Fixed negative values")
+            
+            elif fix_type == "outliers":
+                success, msg = self._processor.apply_fix("remove_outliers", threshold=3.0)
+                if success:
+                    fixes_applied.append("Removed outliers")
         
         if fixes_applied:
             # recalculate quality after fixes
@@ -688,9 +732,13 @@ class DataTab(QWidget):
         else:
             QMessageBox.information(
                 self,
-                "No Fixes Needed",
-                "No recommended fixes to apply.\nYour data quality is already good!"
+                "No Fixes Applied",
+                "No fixes were successfully applied."
             )
+    
+    def _apply_fixes(self) -> None:
+        # deprecated - use _show_fix_dialog instead
+        self._show_fix_dialog()
     
     # ---------- SKU CLASSIFICATION ----------
     
@@ -716,9 +764,11 @@ class DataTab(QWidget):
     # ---------- FLAGGED ITEMS ----------
     
     def add_flagged_sku(self, sku: str) -> None:
-        # add sku to flagged list
+        # add sku to flagged list - no tab change
         self._flagged_skus.add(sku)
         self._update_flagged_display()
+        # emit signal instead of changing tab
+        self.sku_flagged.emit(sku)
     
     def _update_flagged_display(self) -> None:
         # update flagged items display
@@ -757,3 +807,98 @@ class DataTab(QWidget):
     def get_classification(self) -> Dict:
         # get sku classification
         return self._processor.classify_skus()
+
+
+# ============================================================================
+#                        FIX SELECTION DIALOG
+# ============================================================================
+
+class FixSelectionDialog(QDialog):
+    # dialog for selecting which fixes to apply
+    
+    def __init__(self, quality_info: Dict, parent=None):
+        # initialize dialog
+        super().__init__(parent)
+        
+        self._quality_info = quality_info
+        self._fix_checks = {}
+        
+        self._setup_ui()
+    
+    def _setup_ui(self) -> None:
+        # setup user interface
+        self.setWindowTitle("Select Fixes to Apply")
+        self.setMinimumWidth(450)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        
+        # header
+        header = QLabel("Choose which fixes to apply to your data:")
+        header.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        layout.addWidget(header)
+        
+        # description
+        desc = QLabel("Each fix will modify your data. Review the options below.")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #666;")
+        layout.addWidget(desc)
+        
+        # fix options
+        issues = self._quality_info.get("issues", [])
+        issues_lower = " ".join(issues).lower()
+        
+        fix_options = [
+            ("missing", "Fill missing values", 
+             "Uses forward fill to replace missing values with previous values",
+             "missing" in issues_lower),
+            ("duplicates", "Aggregate duplicate entries",
+             "Sums quantities for rows with same item and date",
+             "duplicate" in issues_lower),
+            ("negative", "Fix negative values",
+             "Sets negative quantity values to zero",
+             "negative" in issues_lower),
+            ("outliers", "Remove statistical outliers",
+             "Removes rows with values outside 3 standard deviations",
+             False)  # outliers always optional
+        ]
+        
+        for key, title, desc, has_issue in fix_options:
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 10)
+            container_layout.setSpacing(2)
+            
+            check = QCheckBox(title)
+            check.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            check.setEnabled(has_issue or key == "outliers")
+            check.setChecked(has_issue)
+            self._fix_checks[key] = check
+            container_layout.addWidget(check)
+            
+            desc_label = QLabel(desc)
+            desc_label.setStyleSheet("color: #666; margin-left: 20px; font-size: 9pt;")
+            container_layout.addWidget(desc_label)
+            
+            if not has_issue and key != "outliers":
+                no_issue = QLabel("✓ No issues detected")
+                no_issue.setStyleSheet("color: #28A745; margin-left: 20px; font-size: 9pt;")
+                container_layout.addWidget(no_issue)
+            
+            layout.addWidget(container)
+        
+        layout.addStretch()
+        
+        # buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+    
+    def get_selected_fixes(self) -> List[str]:
+        # get list of selected fix types
+        return [key for key, check in self._fix_checks.items() 
+                if check.isEnabled() and check.isChecked()]

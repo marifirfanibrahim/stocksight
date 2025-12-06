@@ -7,7 +7,7 @@ handles sku browsing clustering and anomaly detection
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFrame, QSplitter,
-    QTabWidget, QMessageBox, QComboBox
+    QTabWidget, QMessageBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -37,7 +37,8 @@ class ExploreTab(QWidget):
     # signals
     clusters_created = pyqtSignal(dict)
     proceed_requested = pyqtSignal()
-    navigate_to_data = pyqtSignal(str)
+    navigate_to_data = pyqtSignal(str)  # keep for main window connection
+    sku_flagged = pyqtSignal(str)       # extra signal if needed elsewhere
     
     def __init__(self, session_model, parent=None):
         # initialize tab
@@ -221,7 +222,10 @@ class ExploreTab(QWidget):
         self._proceed_btn = QPushButton("Proceed to Feature Engineering →")
         self._proceed_btn.setEnabled(False)
         self._proceed_btn.setMinimumHeight(40)
-        self._proceed_btn.setStyleSheet(f"background-color: {config.UI_COLORS['primary']}; color: white; font-weight: bold;")
+        self._proceed_btn.setStyleSheet(
+            f"background-color: {config.UI_COLORS['primary']}; "
+            f"color: white; font-weight: bold;"
+        )
         self._proceed_btn.clicked.connect(self.proceed_requested.emit)
         bottom_layout.addWidget(self._proceed_btn)
         
@@ -511,31 +515,44 @@ class ExploreTab(QWidget):
             QMessageBox.information(self, "No Anomalies", "No significant anomalies to review")
             return
         
-        dialog = AnomalyReviewDialog(playlist, self)
-        dialog.set_processor(self._processor)
+        dialog = AnomalyReviewDialog(playlist, self, processor=self._processor)
         dialog.anomalies_actioned.connect(self._on_anomalies_actioned)
-        dialog.navigate_to_sku.connect(self._navigate_to_sku)
+        dialog.anomalies_corrected.connect(self._on_anomalies_corrected)
         dialog.flag_for_correction.connect(self._on_flag_for_correction)
         dialog.exec_()
-
+    
     def _on_flag_for_correction(self, sku: str) -> None:
         # handle flag for correction from anomaly dialog
+        # emit both signals so data tab can flag item without tab change
+        self.sku_flagged.emit(sku)
         self.navigate_to_data.emit(sku)
     
     def _on_anomalies_actioned(self, actions: List) -> None:
-        # handle anomaly actions
-        flagged = [a for a, action in actions if action == "Flag"]
+        # handle anomaly actions summary
+        flagged = [a.sku for a, action in actions if action == "Flag"]
         
         if flagged:
             QMessageBox.information(
                 self, 
                 "Anomalies Flagged",
                 f"{len(flagged)} anomalies flagged for correction.\n"
-                "Switch to Data tab to review and fix."
+                "You can review flagged items in the Data tab when ready."
             )
     
+    def _on_anomalies_corrected(self, corrections: List[Dict]) -> None:
+        # handle auto corrections and removals
+        if not corrections:
+            return
+        
+        QMessageBox.information(
+            self,
+            "Data Updated",
+            "Some values were auto-corrected based on expected patterns.\n"
+            "Data quality metrics in the Data tab will reflect these changes."
+        )
+    
     def _navigate_to_sku(self, sku: str) -> None:
-        # navigate to sku in chart
+        # navigate to sku in chart and navigator
         self._navigator.select_sku(sku)
         self._on_sku_selected(sku)
     
@@ -575,8 +592,14 @@ class ExploreTab(QWidget):
         cluster = self._clustering.get_cluster_for_sku(sku)
         if cluster:
             details_parts.append(f"<b>Cluster:</b> {cluster.cluster_label}")
-            details_parts.append(f"<b>Volume Tier:</b> {config.CLUSTER_LABELS['volume'].get(cluster.volume_tier, cluster.volume_tier)}")
-            details_parts.append(f"<b>Pattern:</b> {config.CLUSTER_LABELS['pattern'].get(cluster.pattern_type, cluster.pattern_type)}")
+            details_parts.append(
+                f"<b>Volume Tier:</b> "
+                f"{config.CLUSTER_LABELS['volume'].get(cluster.volume_tier, cluster.volume_tier)}"
+            )
+            details_parts.append(
+                f"<b>Pattern:</b> "
+                f"{config.CLUSTER_LABELS['pattern'].get(cluster.pattern_type, cluster.pattern_type)}"
+            )
             details_parts.append(f"<b>Total Volume:</b> {cluster.total_volume:,.0f}")
             details_parts.append(f"<b>Variability (CV):</b> {cluster.cv:.2f}")
         
@@ -645,12 +668,15 @@ class ExploreTab(QWidget):
         if self._current_sku is None:
             return
         
+        # emit both signals so data tab can flag item without tab change
+        self.sku_flagged.emit(self._current_sku)
         self.navigate_to_data.emit(self._current_sku)
+        
         QMessageBox.information(
             self,
             "Flagged for Correction",
             f"Item '{self._current_sku}' has been flagged.\n"
-            "Switch to Data tab to review and correct."
+            "You can review it in the Data tab when you are ready."
         )
     
     def _on_heatmap_cell_clicked(self, row_label: str, col_label: str) -> None:

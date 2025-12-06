@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QBrush
 from typing import Dict, List, Optional
+import pandas as pd
 
 import config
 from core.anomaly_detector import Anomaly
@@ -29,7 +30,7 @@ class AnomalyReviewDialog(QDialog):
     anomalies_actioned = pyqtSignal(list)
     anomalies_corrected = pyqtSignal(list)
     navigate_to_sku = pyqtSignal(str)
-    flag_for_correction = pyqtSignal(str)
+    flag_for_correction = pyqtSignal(str)  # emits sku, no tab change
     view_sku_chart = pyqtSignal(str)
     
     # ---------- CONSTANTS ----------
@@ -42,6 +43,9 @@ class AnomalyReviewDialog(QDialog):
         self._anomalies = anomalies
         self._processor = processor
         self._actions = {}
+        self._flagged_skus = set()
+        self._corrected_data = {}
+        
         self._setup_ui()
         self._populate_table()
     
@@ -268,7 +272,7 @@ class AnomalyReviewDialog(QDialog):
                 elif type_filter == "gaps" and anomaly.anomaly_type != "gap":
                     show = False
             
-            # severity filter - fixed logic
+            # severity filter
             if show:
                 if "High Only" in severity_filter and anomaly.severity < 0.7:
                     show = False
@@ -357,7 +361,7 @@ class AnomalyReviewDialog(QDialog):
         self._details_label.setText(details)
     
     def _view_in_chart(self) -> None:
-        # open sku chart in separate window
+        # open sku chart in separate window - shows ALL data for the item
         selected = self._table.selectedItems()
         if not selected:
             return
@@ -376,7 +380,7 @@ class AnomalyReviewDialog(QDialog):
             date_col = self._processor.get_mapped_column("date")
             qty_col = self._processor.get_mapped_column("quantity")
             
-            # get all anomalies for this sku
+            # get ALL anomalies for this sku (not just current one)
             sku_anomalies = [
                 {"date": a.date, "value": a.value, "type": a.anomaly_type}
                 for a in self._anomalies if a.sku == sku
@@ -393,7 +397,7 @@ class AnomalyReviewDialog(QDialog):
             self.view_sku_chart.emit(sku)
     
     def _flag_selected(self) -> None:
-        # flag selected anomaly for correction
+        # flag selected anomaly for correction - no tab change
         selected = self._table.selectedItems()
         if selected:
             row = selected[0].row()
@@ -409,14 +413,17 @@ class AnomalyReviewDialog(QDialog):
                         combo.setCurrentIndex(index)
                         self._actions[row] = "Flag"
                 
-                # emit signal
+                # add to flagged set
+                self._flagged_skus.add(anomaly.sku)
+                
+                # emit signal - does NOT change tab
                 self.flag_for_correction.emit(anomaly.sku)
                 
                 QMessageBox.information(
                     self,
                     "Flagged",
                     f"Item '{anomaly.sku}' has been flagged for correction.\n"
-                    "You can find it in the Data tab after closing this dialog."
+                    "You can find it in the Data tab when you're ready."
                 )
     
     def _update_summary(self) -> None:
@@ -446,8 +453,6 @@ class AnomalyReviewDialog(QDialog):
         )
         
         if path:
-            import pandas as pd
-            
             data = []
             for i, anomaly in enumerate(self._anomalies):
                 action = self._actions.get(i, "Pending")
@@ -468,44 +473,105 @@ class AnomalyReviewDialog(QDialog):
             QMessageBox.information(self, "Export Complete", f"Exported to:\n{path}")
     
     def _on_apply(self) -> None:
-        # apply all actions
+        # apply all actions - actually perform the corrections
         result = []
-        flagged_skus = []
+        flagged_skus = set()
+        removed_indices = []
+        corrected_data = []
         action_summary = {}
         
         for i, anomaly in enumerate(self._anomalies):
             action = self._actions.get(i, "Pending")
-            if action != "Pending":
-                result.append((anomaly, action))
-                action_summary[action] = action_summary.get(action, 0) + 1
-                if action == "Flag":
-                    flagged_skus.append(anomaly.sku)
-        
-        # emit signals
-        self.anomalies_actioned.emit(result)
-        
-        # emit flag signals for each flagged sku
-        for sku in set(flagged_skus):
-            self.flag_for_correction.emit(sku)
-        
-        # show detailed confirmation
-        if result:
-            summary_lines = [f"• {v} anomalies: {k}" for k, v in action_summary.items()]
+            if action == "Pending":
+                continue
             
-            QMessageBox.information(
-                self,
-                "Actions Applied Successfully",
-                f"Applied {len(result)} actions:\n\n" +
-                "\n".join(summary_lines) +
-                f"\n\n{len(set(flagged_skus))} unique items flagged for correction.\n"
-                "Flagged items can be found in the Data tab."
-            )
-        else:
+            result.append((anomaly, action))
+            action_summary[action] = action_summary.get(action, 0) + 1
+            
+            if action == "Flag":
+                flagged_skus.add(anomaly.sku)
+            elif action == "Auto-correct":
+                # store correction info
+                corrected_data.append({
+                    "sku": anomaly.sku,
+                    "date": anomaly.date,
+                    "old_value": anomaly.value,
+                    "new_value": anomaly.expected_value
+                })
+            elif action == "Remove":
+                removed_indices.append({
+                    "sku": anomaly.sku,
+                    "date": anomaly.date
+                })
+        
+        if not result:
             QMessageBox.information(
                 self,
                 "No Actions",
                 "No actions were applied.\nAll anomalies are still pending."
             )
+            return
+        
+        # perform actual corrections if processor available
+        corrections_made = 0
+        removals_made = 0
+        
+        if self._processor and self._processor.processed_data is not None:
+            df = self._processor.processed_data
+            sku_col = self._processor.get_mapped_column("sku")
+            date_col = self._processor.get_mapped_column("date")
+            qty_col = self._processor.get_mapped_column("quantity")
+            
+            # apply auto-corrections
+            for correction in corrected_data:
+                mask = (df[sku_col] == correction["sku"]) & \
+                       (df[date_col].astype(str) == str(correction["date"]))
+                if mask.any():
+                    df.loc[mask, qty_col] = correction["new_value"]
+                    corrections_made += 1
+            
+            # apply removals
+            for removal in removed_indices:
+                mask = (df[sku_col] == removal["sku"]) & \
+                       (df[date_col].astype(str) == str(removal["date"]))
+                if mask.any():
+                    df = df[~mask]
+                    removals_made += 1
+            
+            # update processor data
+            self._processor.processed_data = df
+        
+        # emit signals
+        self.anomalies_actioned.emit(result)
+        
+        # emit flag signals for each flagged sku - no tab change
+        for sku in flagged_skus:
+            self.flag_for_correction.emit(sku)
+        
+        # emit corrections if any
+        if corrected_data:
+            self.anomalies_corrected.emit(corrected_data)
+        
+        # build detailed summary
+        summary_lines = []
+        for action, count in action_summary.items():
+            summary_lines.append(f"• {count} anomalies: {action}")
+        
+        correction_info = ""
+        if corrections_made > 0:
+            correction_info += f"\n\n{corrections_made} values were auto-corrected to expected values."
+        if removals_made > 0:
+            correction_info += f"\n{removals_made} data points were removed."
+        if flagged_skus:
+            correction_info += f"\n\n{len(flagged_skus)} unique items flagged for review in Data tab."
+        
+        QMessageBox.information(
+            self,
+            "Actions Applied Successfully",
+            f"Applied {len(result)} actions:\n\n" +
+            "\n".join(summary_lines) +
+            correction_info
+        )
         
         self.accept()
     
@@ -518,5 +584,5 @@ class AnomalyReviewDialog(QDialog):
         return result
     
     def set_processor(self, processor) -> None:
-        # set data processor for chart viewing
+        # set data processor for chart viewing and corrections
         self._processor = processor

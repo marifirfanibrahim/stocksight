@@ -21,6 +21,7 @@ from ui.widgets.virtual_data_table import VirtualDataTable
 from ui.widgets.time_series_chart import TimeSeriesChart
 from ui.models.forecast_model import ForecastTableModel
 from ui.dialogs.forecast_settings_dialog import ForecastSettingsDialog
+from ui.dialogs.help_dialog import ForecastHelpDialog
 from ui.widgets.export_wizard import ExportWizard
 from ui.widgets.progress_dialog import ProgressDialog
 from utils.worker_threads import WorkerThread
@@ -67,6 +68,12 @@ class ForecastTab(QWidget):
         header = QLabel("Forecast Factory")
         header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         header_layout.addWidget(header)
+        
+        # help button
+        self._help_btn = QPushButton("❓ What do these terms mean?")
+        self._help_btn.setMaximumWidth(200)
+        self._help_btn.clicked.connect(self._show_help)
+        header_layout.addWidget(self._help_btn)
         
         header_layout.addStretch()
         
@@ -314,13 +321,24 @@ class ForecastTab(QWidget):
         # connect widget signals
         pass
     
+    # ---------- HELP ----------
+    
+    def _show_help(self) -> None:
+        # show forecast terminology help dialog
+        dialog = ForecastHelpDialog(self)
+        dialog.exec_()
+    
     # ---------- SETTINGS ----------
     
     def _show_settings(self) -> None:
         # show forecast settings dialog
         sku_count = self._session.state.total_skus or 0
         
-        dialog = ForecastSettingsDialog(sku_count, self)
+        # get cluster info for advanced strategy
+        clusters = self._session.get_clusters()
+        a_item_count = sum(1 for c in clusters.values() if c.volume_tier == "A") if clusters else 0
+        
+        dialog = ForecastSettingsDialog(sku_count, a_item_count, self)
         dialog.settings_confirmed.connect(self._on_settings_confirmed)
         dialog.exec_()
     
@@ -336,8 +354,13 @@ class ForecastTab(QWidget):
         freq_labels = {"D": "Daily", "W": "Weekly", "M": "Monthly"}
         freq_label = freq_labels.get(self._current_frequency, "Daily")
         
+        # show item scope for advanced
+        scope_text = ""
+        if strategy == "advanced":
+            scope_text = " (A-items only)"
+        
         self._strategy_label.setText(
-            f"Strategy: {strategy_info.get('icon', '')} {strategy_info.get('name', strategy)} | {freq_label}"
+            f"Strategy: {strategy_info.get('icon', '')} {strategy_info.get('name', strategy)}{scope_text} | {freq_label}"
         )
         self._strategy_label.setStyleSheet("color: #333;")
     
@@ -357,6 +380,7 @@ class ForecastTab(QWidget):
         settings = self._settings
         self._current_frequency = settings.get("frequency", "D")
         generate_comparison = settings.get("model_comparison", False)
+        strategy = settings.get("strategy", "balanced")
         
         # show progress
         progress = ProgressDialog("Generating Forecasts", self)
@@ -374,6 +398,16 @@ class ForecastTab(QWidget):
         for sku, cluster in clusters.items():
             tier_mapping[sku] = cluster.volume_tier
         
+        # for advanced strategy, filter to A-items only
+        data_to_forecast = self._processor.processed_data
+        if strategy == "advanced":
+            a_items = [sku for sku, tier in tier_mapping.items() if tier == "A"]
+            if a_items:
+                data_to_forecast = self._processor.processed_data[
+                    self._processor.processed_data[sku_col].isin(a_items)
+                ]
+                progress.set_status(f"Forecasting {len(a_items)} A-items with advanced models...")
+        
         # get features
         features_data = self._session.get_features()
         feature_cols = features_data.get("selected_features", []) if features_data else None
@@ -382,9 +416,9 @@ class ForecastTab(QWidget):
         def do_forecasting(progress_callback=None):
             # generate main forecasts
             forecasts = self._forecaster.forecast_batch(
-                self._processor.processed_data,
+                data_to_forecast,
                 sku_col, date_col, qty_col,
-                strategy=settings.get("strategy", "balanced"),
+                strategy=strategy,
                 horizon=settings.get("horizon", 30),
                 frequency=settings.get("frequency", "D"),
                 tier_mapping=tier_mapping if settings.get("tier_processing", True) else None,
@@ -396,11 +430,11 @@ class ForecastTab(QWidget):
             comparison = None
             if generate_comparison:
                 comparison = self._forecaster.compare_models(
-                    self._processor.processed_data,
+                    data_to_forecast,
                     sku_col, date_col, qty_col,
                     horizon=settings.get("horizon", 30),
                     frequency=settings.get("frequency", "D"),
-                    sample_size=min(50, len(self._processor.sku_list))
+                    sample_size=min(50, len(data_to_forecast[sku_col].unique()))
                 )
             
             return forecasts, comparison

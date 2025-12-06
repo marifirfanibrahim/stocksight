@@ -26,11 +26,12 @@ class ForecastSettingsDialog(QDialog):
     # signals
     settings_confirmed = pyqtSignal(dict)
     
-    def __init__(self, sku_count: int = 0, parent=None):
+    def __init__(self, sku_count: int = 0, a_item_count: int = 0, parent=None):
         # initialize dialog
         super().__init__(parent)
         
         self._sku_count = sku_count
+        self._a_item_count = a_item_count
         self._horizon_spin = None
         self._strategy_group = None
         self._frequency_combo = None
@@ -48,7 +49,7 @@ class ForecastSettingsDialog(QDialog):
         # setup user interface
         self.setWindowTitle("Forecast Settings")
         self.setMinimumWidth(580)
-        self.setMinimumHeight(580)
+        self.setMinimumHeight(620)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         layout = QVBoxLayout(self)
@@ -133,6 +134,12 @@ class ForecastSettingsDialog(QDialog):
             details.setStyleSheet("font-size: 10px; margin-left: 20px;")
             container_layout.addWidget(details)
             
+            # special note for advanced - clarify A-items only
+            if key == "advanced":
+                scope_note = QLabel(f"⚠ Will only run on A-items ({self._a_item_count} items)")
+                scope_note.setStyleSheet("color: #E65100; font-size: 10px; margin-left: 20px; font-weight: bold;")
+                container_layout.addWidget(scope_note)
+            
             layout.addWidget(container)
             
             # select balanced by default
@@ -204,6 +211,10 @@ class ForecastSettingsDialog(QDialog):
         self._tier_processing.setChecked(True)
         self._tier_processing.stateChanged.connect(self._update_estimate)
         layout.addWidget(self._tier_processing)
+        
+        tier_note = QLabel("A-items get individual attention, C-items use simpler models")
+        tier_note.setStyleSheet("color: #666; font-size: 9px; margin-left: 20px;")
+        layout.addWidget(tier_note)
         
         # include confidence intervals
         self._include_intervals = QCheckBox("Include confidence intervals")
@@ -292,9 +303,18 @@ class ForecastSettingsDialog(QDialog):
         strategy_info = config.FORECASTING.get(strategy, {})
         time_str = strategy_info.get("time_estimate", "Unknown")
         
-        # adjust estimate based on sku count and frequency
-        if self._sku_count > 0:
-            scale_factor = self._sku_count / 10000
+        # determine item count based on strategy
+        if strategy == "advanced":
+            # advanced only runs on A-items
+            item_count = self._a_item_count
+            item_text = f"{item_count:,} A-items only"
+        else:
+            item_count = self._sku_count
+            item_text = f"{item_count:,} items"
+        
+        # adjust estimate based on item count and frequency
+        if item_count > 0:
+            scale_factor = item_count / 10000
             
             # frequency affects processing time
             freq_factor = {"D": 1.0, "W": 0.6, "M": 0.4}.get(frequency, 1.0)
@@ -311,11 +331,9 @@ class ForecastSettingsDialog(QDialog):
             else:
                 hours = minutes / 60
                 time_estimate = f"~{hours:.1f} hours"
-            
-            sku_text = f"{self._sku_count:,} items"
         else:
             time_estimate = time_str
-            sku_text = "your items"
+            item_text = "your items"
         
         # build estimate message
         models = strategy_info.get("models", [])
@@ -336,12 +354,14 @@ class ForecastSettingsDialog(QDialog):
             periods = horizon
         
         message = (
-            f"📊 Estimated time: {time_estimate} for {sku_text}\n"
+            f"📊 Estimated time: {time_estimate} for {item_text}\n"
             f"🔧 Using {model_count} forecasting models\n"
             f"📅 Generating {periods} {freq_label} forecast periods"
         )
         
-        if self._tier_processing and self._tier_processing.isChecked():
+        if strategy == "advanced":
+            message += "\n⚠ Advanced strategy runs on A-items only for best accuracy"
+        elif self._tier_processing and self._tier_processing.isChecked():
             message += "\n✓ Tier-based processing enabled (faster for large datasets)"
         
         self._estimate_label.setText(message)
