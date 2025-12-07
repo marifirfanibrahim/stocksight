@@ -1,0 +1,64 @@
+# python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# compiled extensions
+*.so
+*.pyd
+*.dll
+
+# virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# pyinstaller artifacts
+*.spec
+*.manifest
+*.pkg
+*.app
+*.exe
+
+# logs
+logs/
+*.log
+stocksight/logs/
+
+# test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# editor / ide settings
+.vscode/
+.idea/
+*.iml
+
+# os files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# jupyter
+.ipynb_checkpoints/
+
+# user sessions and cache
+*.sss        # stocksight session files
+stocksight/cache/
+stocksight/__pycache__/
+stocksight/*/__pycache__/
+
+# local config overrides
+*.local.ini
+*.env
