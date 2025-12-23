@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QDragEnterEvent, QDropEvent
+from PyQt5.QtWidgets import QApplication
 from typing import Optional, Dict, List, Tuple
 import os
 
@@ -98,7 +99,13 @@ class DataTab(QWidget):
         
         header_layout = QHBoxLayout()
         preview_label = QLabel("Data Preview")
-        preview_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            pv_font = QFont(base_font.family(), max(9, base_font.pointSize()), QFont.Bold)
+            preview_label.setFont(pv_font)
+        except Exception:
+            preview_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
         header_layout.addWidget(preview_label)
         
         header_layout.addStretch()
@@ -133,7 +140,13 @@ class DataTab(QWidget):
         dz_layout.setAlignment(Qt.AlignCenter)
         
         icon = QLabel("📁")
-        icon.setFont(QFont("Segoe UI", 28))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            ic_font = QFont(base_font.family(), max(20, base_font.pointSize() + 16))
+            icon.setFont(ic_font)
+        except Exception:
+            icon.setFont(QFont("Segoe UI", 28))
         icon.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(icon)
         
@@ -169,23 +182,47 @@ class DataTab(QWidget):
         
         layout.addWidget(QLabel("Total Items (SKUs):"), 0, 0)
         self._sku_count_label = QLabel("--")
-        self._sku_count_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            sku_font = QFont(base_font.family(), max(9, base_font.pointSize()), QFont.Bold)
+            self._sku_count_label.setFont(sku_font)
+        except Exception:
+            self._sku_count_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         self._sku_count_label.setStyleSheet("color: #2E86AB;")
         layout.addWidget(self._sku_count_label, 0, 1)
         
         layout.addWidget(QLabel("Total Rows:"), 1, 0)
         self._total_rows_label = QLabel("--")
-        self._total_rows_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            tr_font = QFont(base_font.family(), max(9, base_font.pointSize()), QFont.Bold)
+            self._total_rows_label.setFont(tr_font)
+        except Exception:
+            self._total_rows_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         layout.addWidget(self._total_rows_label, 1, 1)
         
         layout.addWidget(QLabel("Displayed Rows:"), 2, 0)
         self._displayed_rows_label = QLabel("--")
-        self._displayed_rows_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            dr_font = QFont(base_font.family(), max(9, base_font.pointSize()), QFont.Bold)
+            self._displayed_rows_label.setFont(dr_font)
+        except Exception:
+            self._displayed_rows_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         layout.addWidget(self._displayed_rows_label, 2, 1)
         
         layout.addWidget(QLabel("Total Columns:"), 3, 0)
         self._total_cols_label = QLabel("--")
-        self._total_cols_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            tc_font = QFont(base_font.family(), max(9, base_font.pointSize()), QFont.Bold)
+            self._total_cols_label.setFont(tc_font)
+        except Exception:
+            self._total_cols_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         layout.addWidget(self._total_cols_label, 3, 1)
         
         return group
@@ -228,14 +265,26 @@ class DataTab(QWidget):
         score_layout = QHBoxLayout()
         
         self._quality_score_label = QLabel("--")
-        self._quality_score_label.setFont(QFont("Segoe UI", 36, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            qs_font = QFont(base_font.family(), max(20, base_font.pointSize() + 18), QFont.Bold)
+            self._quality_score_label.setFont(qs_font)
+        except Exception:
+            self._quality_score_label.setFont(QFont("Segoe UI", 36, QFont.Bold))
         self._quality_score_label.setAlignment(Qt.AlignCenter)
         self._quality_score_label.setMinimumWidth(80)
         score_layout.addWidget(self._quality_score_label)
         
         info_layout = QVBoxLayout()
         self._quality_status_label = QLabel("Upload data to check quality")
-        self._quality_status_label.setFont(QFont("Segoe UI", 12))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            qs2_font = QFont(base_font.family(), max(9, base_font.pointSize()))
+            self._quality_status_label.setFont(qs2_font)
+        except Exception:
+            self._quality_status_label.setFont(QFont("Segoe UI", 12))
         info_layout.addWidget(self._quality_status_label)
         
         self._quality_details_label = QLabel("")
@@ -291,20 +340,38 @@ class DataTab(QWidget):
             tier_layout.setSpacing(4)
             
             t_label = QLabel(tier)
-            t_label.setFont(QFont("Segoe UI", 32, QFont.Bold))
+            try:
+                app = QApplication.instance()
+                base_font = app.font() if app is not None else QFont()
+                tfont = QFont(base_font.family(), max(18, base_font.pointSize() + 12), QFont.Bold)
+                t_label.setFont(tfont)
+            except Exception:
+                t_label.setFont(QFont("Segoe UI", 32, QFont.Bold))
             t_label.setAlignment(Qt.AlignCenter)
             t_label.setStyleSheet(f"color: {color};")
             tier_layout.addWidget(t_label)
             
             count_label = QLabel("--")
             count_label.setObjectName(f"tier_{tier}_count")
-            count_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            try:
+                app = QApplication.instance()
+                base_font = app.font() if app is not None else QFont()
+                cf = QFont(base_font.family(), max(10, base_font.pointSize() + 2), QFont.Bold)
+                count_label.setFont(cf)
+            except Exception:
+                count_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
             count_label.setAlignment(Qt.AlignCenter)
             count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             tier_layout.addWidget(count_label)
             
             d_label = QLabel(desc)
-            d_label.setFont(QFont("Segoe UI", 11))
+            try:
+                app = QApplication.instance()
+                base_font = app.font() if app is not None else QFont()
+                df = QFont(base_font.family(), max(9, base_font.pointSize()))
+                d_label.setFont(df)
+            except Exception:
+                d_label.setFont(QFont("Segoe UI", 11))
             d_label.setStyleSheet("color: #555;")
             d_label.setAlignment(Qt.AlignCenter)
             tier_layout.addWidget(d_label)

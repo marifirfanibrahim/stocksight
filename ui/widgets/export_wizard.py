@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
     QLabel, QRadioButton, QButtonGroup, QCheckBox,
     QLineEdit, QPushButton, QFileDialog, QGroupBox,
     QComboBox, QListWidget, QListWidgetItem, QTextEdit
+    , QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -348,7 +349,14 @@ class SummaryPage(QWizardPage):
         # summary text
         self._summary_text = QTextEdit()
         self._summary_text.setReadOnly(True)
-        self._summary_text.setFont(QFont("Consolas", 10))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            # use a monospace-like size; keep Consolas as fallback
+            summ_font = QFont(base_font.family(), max(9, base_font.pointSize()))
+            self._summary_text.setFont(summ_font)
+        except Exception:
+            self._summary_text.setFont(QFont("Consolas", 10))
         layout.addWidget(self._summary_text)
         
         # note

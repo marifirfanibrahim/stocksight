@@ -380,49 +380,10 @@ class FeaturesTab(QWidget):
         self._use_processes_check.stateChanged.connect(_on_use_processes_changed)
         layout.addWidget(self._use_processes_check)
         
-        # Accessibility: text size and high-contrast theme
-        size_layout = QHBoxLayout()
-        size_layout.addWidget(QLabel("Text size:"))
-        self._text_size_combo = QComboBox()
-        for s in config.UI_SETTINGS.get("text_size_options", [11, 12, 13, 14]):
-            self._text_size_combo.addItem(str(s), s)
-        # prefer persisted preference
-        try:
-            pref_size = None
-            if hasattr(self, "_session") and getattr(self._session, "get_preference", None):
-                pref_size = self._session.get_preference("text_size", None)
-            if pref_size is not None:
-                idx = self._text_size_combo.findData(int(pref_size))
-                if idx >= 0:
-                    self._text_size_combo.setCurrentIndex(idx)
-            else:
-                default_size = config.UI_SETTINGS.get("default_text_size", 12)
-                idx = self._text_size_combo.findData(int(default_size))
-                if idx >= 0:
-                    self._text_size_combo.setCurrentIndex(idx)
-        except Exception:
-            pass
-
-        self._text_size_combo.currentIndexChanged.connect(self._on_text_size_changed)
-        size_layout.addWidget(self._text_size_combo)
-        size_layout.addStretch()
-        layout.addLayout(size_layout)
-
-        self._high_contrast_check = QCheckBox("High contrast theme")
-        self._high_contrast_check.setToolTip("Enable a high-contrast color theme for better readability")
-        try:
-            pref_hc = None
-            if hasattr(self, "_session") and getattr(self._session, "get_preference", None):
-                pref_hc = self._session.get_preference("high_contrast", None)
-            if pref_hc is not None:
-                self._high_contrast_check.setChecked(bool(pref_hc))
-            else:
-                self._high_contrast_check.setChecked(bool(config.UI_SETTINGS.get("high_contrast_default", False)))
-        except Exception:
-            pass
-
-        self._high_contrast_check.stateChanged.connect(self._on_high_contrast_changed)
-        layout.addWidget(self._high_contrast_check)
+        # Accessibility & theme: moved to View → Preferences
+        hint = QLabel("Accessibility & theme preferences moved to View → Preferences")
+        hint.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(hint)
         
         # lag customization
         lag_layout = QHBoxLayout()
@@ -581,30 +542,6 @@ class FeaturesTab(QWidget):
         try:
             if hasattr(self, "_session") and getattr(self._session, "set_preference", None):
                 self._session.set_preference("text_size", size)
-        except Exception:
-            pass
-
-    def _on_high_contrast_changed(self, state: int) -> None:
-        enabled = state == Qt.Checked
-        # apply a simple high-contrast stylesheet
-        try:
-            app = QApplication.instance()
-            if app is not None:
-                if enabled:
-                    # minimal high-contrast stylesheet
-                    app.setStyleSheet(
-                        "QWidget { background-color: #000000; color: #FFFFFF; }"
-                        "QPushButton { background-color: #222222; color: #FFFFFF; border: 1px solid #FFFFFF; }"
-                        "QTableWidget { background-color: #000000; color: #FFFFFF; gridline-color: #444444; }"
-                    )
-                else:
-                    app.setStyleSheet("")
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, "_session") and getattr(self._session, "set_preference", None):
-                self._session.set_preference("high_contrast", enabled)
         except Exception:
             pass
 

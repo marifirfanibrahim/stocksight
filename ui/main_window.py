@@ -16,6 +16,8 @@ from typing import Optional
 
 import config
 from ui.models.session_model import SessionModel
+from ui.dialogs.preferences_dialog import PreferencesDialog
+import ui.theme_manager as theme_manager
 from ui.tabs.data_tab import DataTab
 from ui.tabs.explore_tab import ExploreTab
 from ui.tabs.features_tab import FeaturesTab
@@ -39,6 +41,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         self._session = SessionModel()
+        # Apply persisted UI preferences early (theme, font size, high-contrast)
+        try:
+            theme_manager.apply_preferences(self._session)
+        except Exception:
+            pass
         self._memory_manager = MemoryManager()
         self._file_handler = FileHandler()
         
@@ -223,6 +230,12 @@ class MainWindow(QMainWindow):
             action.setData(i)
             action.triggered.connect(self._on_switch_tab)
             view_menu.addAction(action)
+        # preferences
+        view_menu.addSeparator()
+        prefs_action = QAction("Preferences...", self)
+        prefs_action.setShortcut("Ctrl+,")
+        prefs_action.triggered.connect(self._open_preferences)
+        view_menu.addAction(prefs_action)
         
         # help menu setup
         help_menu = menubar.addMenu("&Help")
@@ -751,6 +764,13 @@ class MainWindow(QMainWindow):
         # show about dialog
         dialog = AboutDialog(self)
         dialog.exec_()
+
+    def _open_preferences(self) -> None:
+        try:
+            dlg = PreferencesDialog(self._session, self)
+            dlg.exec_()
+        except Exception:
+            pass
     
     # ---------- WINDOW EVENTS ----------
     
