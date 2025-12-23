@@ -13,8 +13,9 @@ PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt, QCoreApplication
+from PyQt5.QtCore import Qt, QCoreApplication, QObject, QEvent
 from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtWidgets import QComboBox
 
 import config
 from utils.logging_config import setup_logging
@@ -38,9 +39,7 @@ def setup_application():
     app.setApplicationVersion(config.APP_VERSION)
     app.setOrganizationName(config.APP_AUTHOR)
     
-    # set default font
-    font = QFont("Segoe UI", 10)
-    app.setFont(font)
+    # Do not override the system font — let the OS/application default be used
     
     # load stylesheet if exists
     style_path = config.STYLES_DIR / "main.qss"
@@ -58,6 +57,20 @@ def main():
     
     # create application
     app = setup_application()
+
+    # Prevent mouse wheel from accidentally changing QComboBox selection when scrolling
+    class _ComboWheelFilter(QObject):
+        def eventFilter(self, obj, event):
+            try:
+                if event.type() == QEvent.Type.Wheel:
+                    # ignore wheel events targeted at combobox widgets
+                    if isinstance(obj, QComboBox):
+                        return True
+                return super().eventFilter(obj, event)
+            except Exception:
+                return False
+
+    app.installEventFilter(_ComboWheelFilter(app))
     
     # create and show main window
     window = MainWindow()

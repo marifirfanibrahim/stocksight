@@ -522,28 +522,7 @@ class FeaturesTab(QWidget):
         body = "\n".join(items) if items else "No details available"
         QMessageBox.information(self, f"Features in {text}", body)
 
-    def _on_text_size_changed(self, index: int) -> None:
-        try:
-            size = int(self._text_size_combo.currentData())
-        except Exception:
-            size = config.UI_SETTINGS.get("default_text_size", 12)
-
-        # apply to application font
-        try:
-            app = QApplication.instance()
-            if app is not None:
-                f = app.font()
-                f.setPointSize(size)
-                app.setFont(f)
-        except Exception:
-            pass
-
-        # persist preference
-        try:
-            if hasattr(self, "_session") and getattr(self._session, "set_preference", None):
-                self._session.set_preference("text_size", size)
-        except Exception:
-            pass
+    # text size handling moved to Preferences dialog; no-op here
 
     def _open_forecast_help(self) -> None:
         # open an existing help dialog that covers forecasting and advanced options

@@ -16,8 +16,7 @@ from typing import Optional
 
 import config
 from ui.models.session_model import SessionModel
-from ui.dialogs.preferences_dialog import PreferencesDialog
-import ui.theme_manager as theme_manager
+# Preferences and theme manager removed — themes are simplified
 from ui.tabs.data_tab import DataTab
 from ui.tabs.explore_tab import ExploreTab
 from ui.tabs.features_tab import FeaturesTab
@@ -41,11 +40,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         self._session = SessionModel()
-        # Apply persisted UI preferences early (theme, font size, high-contrast)
-        try:
-            theme_manager.apply_preferences(self._session)
-        except Exception:
-            pass
         self._memory_manager = MemoryManager()
         self._file_handler = FileHandler()
         
@@ -112,55 +106,8 @@ class MainWindow(QMainWindow):
             x = (screen.width() - self.width()) // 2
             y = (screen.height() - self.height()) // 2
             self.move(x, y)
-        # Apply UI scaling so contents shrink when the window is smaller than defaults
-        try:
-            # compute scale relative to the configured default window size
-            base_w = getattr(config, "WINDOW_DEFAULT_WIDTH", 1400)
-            base_h = getattr(config, "WINDOW_DEFAULT_HEIGHT", 900)
-            scale_w = self.width() / float(base_w)
-            scale_h = self.height() / float(base_h)
-            scale = min(scale_w, scale_h, 1.0)
-            self._last_scale = None
-            self._apply_ui_scaling(scale)
-        except Exception:
-            self._last_scale = None
-
-    def _apply_ui_scaling(self, scale: float) -> None:
-        """Apply global UI scaling by adjusting the application font size.
-
-        scale: 1.0 means normal size; values <1.0 shrink fonts/layouts proportionally.
-        """
-        try:
-            # avoid frequent small updates
-            if hasattr(self, "_last_scale") and self._last_scale is not None:
-                if abs(self._last_scale - scale) < 0.05:
-                    return
-
-            base_size = config.UI_SETTINGS.get("default_text_size", 12)
-            new_size = max(8, int(round(base_size * scale)))
-            app = QApplication.instance()
-            if app:
-                font = app.font()
-                # only change if different to avoid unnecessary repaint
-                if font.pointSize() != new_size:
-                    font.setPointSize(new_size)
-                    app.setFont(font)
-
-            self._last_scale = scale
-        except Exception:
-            pass
-
-    def resizeEvent(self, event) -> None:  # override to update scaling on resize
-        try:
-            base_w = getattr(config, "WINDOW_DEFAULT_WIDTH", 1400)
-            base_h = getattr(config, "WINDOW_DEFAULT_HEIGHT", 900)
-            scale_w = self.width() / float(base_w)
-            scale_h = self.height() / float(base_h)
-            scale = min(scale_w, scale_h, 1.0)
-            self._apply_ui_scaling(scale)
-        except Exception:
-            pass
-        return super().resizeEvent(event)
+        # No automatic UI scaling — respect the system/application font size.
+        return
     
     # ---------- MENU SETUP ----------
     
@@ -230,12 +177,7 @@ class MainWindow(QMainWindow):
             action.setData(i)
             action.triggered.connect(self._on_switch_tab)
             view_menu.addAction(action)
-        # preferences
-        view_menu.addSeparator()
-        prefs_action = QAction("Preferences...", self)
-        prefs_action.setShortcut("Ctrl+,")
-        prefs_action.triggered.connect(self._open_preferences)
-        view_menu.addAction(prefs_action)
+        # Preferences removed — global settings are not exposed here
         
         # help menu setup
         help_menu = menubar.addMenu("&Help")
@@ -765,12 +707,6 @@ class MainWindow(QMainWindow):
         dialog = AboutDialog(self)
         dialog.exec_()
 
-    def _open_preferences(self) -> None:
-        try:
-            dlg = PreferencesDialog(self._session, self)
-            dlg.exec_()
-        except Exception:
-            pass
     
     # ---------- WINDOW EVENTS ----------
     

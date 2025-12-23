@@ -1,0 +1,13 @@
+/* Basic dark theme for StockSight */
+QWidget { background-color: #1e1e1e; color: #e6e6e6; }
+QToolBar { background-color: #2a2a2a; }
+QMenuBar { background-color: #2a2a2a; color: #e6e6e6; }
+QStatusBar { background-color: #2a2a2a; color: #cfcfcf; }
+QPushButton { background-color: #2e2e2e; color: #e6e6e6; border: 1px solid #444; padding: 4px 8px; }
+QTableWidget { background-color: #141414; color: #e6e6e6; gridline-color: #333; }
+QHeaderView::section { background-color: #2a2a2a; color: #e6e6e6; }
+QGroupBox { border: 1px solid #333; margin-top: 6px; }
+QLabel { color: #e6e6e6; }
+QLineEdit, QTextEdit { background-color: #101010; color: #e6e6e6; }
+QComboBox { background-color: #1b1b1b; color: #e6e6e6; }
+QSpinBox { background-color: #101010; color: #e6e6e6; }
