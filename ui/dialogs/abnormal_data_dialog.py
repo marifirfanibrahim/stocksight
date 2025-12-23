@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QBrush
+from PyQt5.QtWidgets import QApplication
 from typing import Dict, List, Any, Optional
 import pandas as pd
 import numpy as np
@@ -57,8 +58,19 @@ class AbnormalDataDialog(QDialog):
     def _setup_ui(self) -> None:
         # setup main dialog ui
         self.setWindowTitle("Abnormal Data Review")
-        self.setMinimumWidth(900)
-        self.setMinimumHeight(600)
+        # Respect available screen size so dialog fits on small displays
+        try:
+            screen = self.screen().availableGeometry()
+            min_w = min(900, max(560, int(screen.width() * 0.6)))
+            min_h = min(600, max(400, int(screen.height() * 0.5)))
+            self.setMinimumSize(min_w, min_h)
+            # Prevent dialog exceeding the screen (leave margins)
+            max_w = max(800, int(screen.width() - 80))
+            max_h = max(600, int(screen.height() - 100))
+            self.setMaximumSize(max_w, max_h)
+        except Exception:
+            self.setMinimumWidth(700)
+            self.setMinimumHeight(480)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         layout = QVBoxLayout(self)
@@ -66,7 +78,13 @@ class AbnormalDataDialog(QDialog):
         
         # header
         header = QLabel("Review Abnormal Data")
-        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            header_font = QFont(base_font.family(), max(10, base_font.pointSize() + 2), QFont.Bold)
+            header.setFont(header_font)
+        except Exception:
+            header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
         
         # description
@@ -200,7 +218,13 @@ class AbnormalDataDialog(QDialog):
             empty = QWidget()
             lay = QVBoxLayout(empty)
             msg = QLabel("✓ No abnormal data detected!")
-            msg.setFont(QFont("Segoe UI", 14))
+            try:
+                app = QApplication.instance()
+                base_font = app.font() if app is not None else QFont()
+                msg_font = QFont(base_font.family(), max(10, base_font.pointSize() + 2))
+                msg.setFont(msg_font)
+            except Exception:
+                msg.setFont(QFont("Segoe UI", 14))
             msg.setAlignment(Qt.AlignCenter)
             msg.setStyleSheet("color: #28A745;")
             lay.addWidget(msg)
@@ -229,7 +253,18 @@ class AbnormalDataDialog(QDialog):
             table.setAlternatingRowColors(True)
             table.setSelectionBehavior(QAbstractItemView.SelectRows)
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            table.horizontalHeader().setStretchLastSection(True)
+            # adjust header resize mode to avoid forcing wide dialogs
+            try:
+                header = table.horizontalHeader()
+                # on small screens prefer stretching to keep dialog width reasonable
+                scr = self.screen().availableGeometry()
+                if scr.width() < 1200:
+                    header.setSectionResizeMode(QHeaderView.Stretch)
+                else:
+                    header.setSectionResizeMode(QHeaderView.ResizeToContents)
+                header.setStretchLastSection(True)
+            except Exception:
+                pass
             table.verticalHeader().setVisible(False)
             table.setSortingEnabled(True)
             
@@ -258,7 +293,11 @@ class AbnormalDataDialog(QDialog):
                     
                     table.setItem(row_idx, j, item)
             
-            table.resizeColumnsToContents()
+            # Resize columns but avoid creating a very wide table on small screens
+            try:
+                table.resizeColumnsToContents()
+            except Exception:
+                pass
             
             tab_layout.addWidget(table)
             

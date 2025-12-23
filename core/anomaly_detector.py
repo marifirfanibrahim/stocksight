@@ -208,24 +208,24 @@ class AnomalyDetector:
         # detect anomalies for all skus
         
         all_anomalies = {}
-        skus = df[sku_col].unique()
-        total = len(skus)
-        
-        for i, sku in enumerate(skus):
-            sku_df = df[df[sku_col] == sku].copy()
+        grouped = df.groupby(sku_col)
+        total = len(grouped)
+
+        for i, (sku, sku_df) in enumerate(grouped):
+            sku_df = sku_df.copy()
             anomalies = self.detect_anomalies(sku_df, date_col, qty_col, method)
-            
+
             # set sku for each anomaly
             for a in anomalies:
                 a.sku = sku
-            
+
             if anomalies:
                 all_anomalies[sku] = anomalies
-            
-            # progress callback
-            if progress_callback and i % 100 == 0:
-                progress_callback((i + 1) / total * 100)
-        
+
+            # progress callback with standardized signature (percent, sku)
+            if progress_callback:
+                progress_callback((i + 1) / total * 100, sku)
+
         self.anomalies = all_anomalies
         return all_anomalies
     

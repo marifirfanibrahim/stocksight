@@ -10,6 +10,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import config
+import json
+
+
+_PREFS_FILENAME = "prefs.json"
+_BOOKMARKS_FILENAME = "bookmarks.json"
 
 
 # ============================================================================
@@ -65,6 +70,18 @@ class SessionModel(QObject):
         self._forecasts = {}
         self._anomalies = {}
         self._bookmarks = []
+        self._preferences = {}
+        # try loading preferences from disk
+        try:
+            self.load_preferences()
+        except Exception:
+            pass
+
+        # try loading bookmarks from disk
+        try:
+            self.load_bookmarks()
+        except Exception:
+            pass
     
     # ---------- STATE MANAGEMENT ----------
     
@@ -201,15 +218,51 @@ class SessionModel(QObject):
         
         self._bookmarks.append(bookmark)
         self.state_changed.emit("bookmarks")
+        try:
+            self.save_bookmarks()
+        except Exception:
+            pass
     
     def remove_bookmark(self, sku: str) -> None:
         # remove sku from bookmarks
         self._bookmarks = [b for b in self._bookmarks if b["sku"] != sku]
         self.state_changed.emit("bookmarks")
+        try:
+            self.save_bookmarks()
+        except Exception:
+            pass
     
     def get_bookmarks(self) -> List[Dict]:
         # get all bookmarks
         return self._bookmarks.copy()
+
+    def _bookmarks_path(self) -> str:
+        try:
+            p = config.APP_DATA_DIR
+            p.mkdir(parents=True, exist_ok=True)
+            return str(p / _BOOKMARKS_FILENAME)
+        except Exception:
+            return _BOOKMARKS_FILENAME
+
+    def save_bookmarks(self) -> None:
+        try:
+            path = self._bookmarks_path()
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(self._bookmarks, fh)
+        except Exception:
+            pass
+
+    def load_bookmarks(self) -> None:
+        try:
+            path = self._bookmarks_path()
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, list):
+                self._bookmarks = data
+        except Exception:
+            pass
     
     def is_bookmarked(self, sku: str) -> bool:
         # check if sku is bookmarked
@@ -233,6 +286,52 @@ class SessionModel(QObject):
             "bookmarks_count": len(self._bookmarks),
             "duration_minutes": duration.total_seconds() / 60
         }
+
+    # ---------- PREFERENCES ----------
+
+    def set_preference(self, key: str, value) -> None:
+        # persist a small UI preference in session (in-memory)
+        self._preferences[key] = value
+        self.state_changed.emit(f"preference:{key}")
+        try:
+            self.save_preferences()
+        except Exception:
+            pass
+
+    def get_preference(self, key: str, default=None):
+        # retrieve a stored preference
+        return self._preferences.get(key, default)
+
+    def _prefs_path(self) -> str:
+        try:
+            p = config.APP_DATA_DIR
+            # ensure dir exists
+            p.mkdir(parents=True, exist_ok=True)
+            return str(p / _PREFS_FILENAME)
+        except Exception:
+            return _PREFS_FILENAME
+
+    def save_preferences(self) -> None:
+        # save preferences to disk as JSON
+        try:
+            path = self._prefs_path()
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(self._preferences, fh)
+        except Exception:
+            pass
+
+    def load_preferences(self) -> None:
+        # load preferences from disk if available
+        try:
+            path = self._prefs_path()
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                self._preferences.update(data)
+        except Exception:
+            pass
     
     def get_export_data(self) -> Dict[str, Any]:
         # get all data for export

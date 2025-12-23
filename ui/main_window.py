@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QStatusBar, QMenuBar, QMenu, QAction,
     QMessageBox, QLabel, QProgressBar, QToolBar,
-    QFileDialog
+    QFileDialog, QApplication
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
@@ -60,14 +60,100 @@ class MainWindow(QMainWindow):
     def _setup_window(self) -> None:
         # setup main window properties
         self.setWindowTitle(f"{config.APP_NAME} v{config.APP_VERSION}")
-        self.setMinimumSize(config.WINDOW_MIN_WIDTH, config.WINDOW_MIN_HEIGHT)
-        self.resize(config.WINDOW_DEFAULT_WIDTH, config.WINDOW_DEFAULT_HEIGHT)
-        
-        # center window on screen
-        screen = self.screen().geometry()
-        x = (screen.width() - self.width()) // 2
-        y = (screen.height() - self.height()) // 2
-        self.move(x, y)
+        # Use reasonable minimums but avoid forcing full-screen on small displays
+        screen = self.screen().availableGeometry()
+
+        available_w = screen.width()
+        available_h = screen.height()
+
+        # Choose safe minimums: don't exceed available area and leave margins
+        safe_min_w = max(600, available_w - 200)
+        safe_min_h = max(480, available_h - 200)
+        min_w = min(config.WINDOW_MIN_WIDTH, safe_min_w)
+        min_h = min(config.WINDOW_MIN_HEIGHT, safe_min_h)
+        self.setMinimumSize(min_w, min_h)
+
+        # Compute initial size as a fraction of the available area (80% by default)
+        default_w = min(config.WINDOW_DEFAULT_WIDTH, int(available_w * 0.8))
+        default_h = min(config.WINDOW_DEFAULT_HEIGHT, int(available_h * 0.8))
+        self.resize(default_w, default_h)
+
+        # restore geometry from session if available (prefers last user size/position)
+        try:
+            geom = None
+            if hasattr(self._session, "get_preference"):
+                geom = self._session.get_preference("window_geometry", None)
+
+            if geom and isinstance(geom, dict):
+                x = geom.get("x", max(0, (available_w - self.width()) // 2))
+                y = geom.get("y", max(0, (available_h - self.height()) // 2))
+                w = geom.get("w", self.width())
+                h = geom.get("h", self.height())
+                # ensure not larger than available screen (leave a small margin)
+                w = min(w, max(100, available_w - 50))
+                h = min(h, max(100, available_h - 80))
+                # ensure width/height respect minimums
+                w = max(w, min_w)
+                h = max(h, min_h)
+                self.setGeometry(x, y, w, h)
+            else:
+                # center window on screen
+                x = (screen.width() - self.width()) // 2
+                y = (screen.height() - self.height()) // 2
+                self.move(x, y)
+        except Exception:
+            x = (screen.width() - self.width()) // 2
+            y = (screen.height() - self.height()) // 2
+            self.move(x, y)
+        # Apply UI scaling so contents shrink when the window is smaller than defaults
+        try:
+            # compute scale relative to the configured default window size
+            base_w = getattr(config, "WINDOW_DEFAULT_WIDTH", 1400)
+            base_h = getattr(config, "WINDOW_DEFAULT_HEIGHT", 900)
+            scale_w = self.width() / float(base_w)
+            scale_h = self.height() / float(base_h)
+            scale = min(scale_w, scale_h, 1.0)
+            self._last_scale = None
+            self._apply_ui_scaling(scale)
+        except Exception:
+            self._last_scale = None
+
+    def _apply_ui_scaling(self, scale: float) -> None:
+        """Apply global UI scaling by adjusting the application font size.
+
+        scale: 1.0 means normal size; values <1.0 shrink fonts/layouts proportionally.
+        """
+        try:
+            # avoid frequent small updates
+            if hasattr(self, "_last_scale") and self._last_scale is not None:
+                if abs(self._last_scale - scale) < 0.05:
+                    return
+
+            base_size = config.UI_SETTINGS.get("default_text_size", 12)
+            new_size = max(8, int(round(base_size * scale)))
+            app = QApplication.instance()
+            if app:
+                font = app.font()
+                # only change if different to avoid unnecessary repaint
+                if font.pointSize() != new_size:
+                    font.setPointSize(new_size)
+                    app.setFont(font)
+
+            self._last_scale = scale
+        except Exception:
+            pass
+
+    def resizeEvent(self, event) -> None:  # override to update scaling on resize
+        try:
+            base_w = getattr(config, "WINDOW_DEFAULT_WIDTH", 1400)
+            base_h = getattr(config, "WINDOW_DEFAULT_HEIGHT", 900)
+            scale_w = self.width() / float(base_w)
+            scale_h = self.height() / float(base_h)
+            scale = min(scale_w, scale_h, 1.0)
+            self._apply_ui_scaling(scale)
+        except Exception:
+            pass
+        return super().resizeEvent(event)
     
     # ---------- MENU SETUP ----------
     
@@ -237,11 +323,20 @@ class MainWindow(QMainWindow):
         self._features_tab = FeaturesTab(self._session)
         self._forecast_tab = ForecastTab(self._session)
         
-        # add tabs to widget
-        self._tabs.addTab(self._data_tab, "1. Data Health")
-        self._tabs.addTab(self._explore_tab, "2. Pattern Discovery")
-        self._tabs.addTab(self._features_tab, "3. Feature Engineering")
-        self._tabs.addTab(self._forecast_tab, "4. Forecast Factory")
+        # add tabs to widget -- wrap each tab in a scroll area so content can scroll if it overflows
+        from PyQt5.QtWidgets import QScrollArea
+
+        def _wrap(widget):
+            scroll = QScrollArea()
+            scroll.setWidget(widget)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(scroll.NoFrame)
+            return scroll
+
+        self._tabs.addTab(_wrap(self._data_tab), "1. Data Health")
+        self._tabs.addTab(_wrap(self._explore_tab), "2. Pattern Discovery")
+        self._tabs.addTab(_wrap(self._features_tab), "3. Feature Engineering")
+        self._tabs.addTab(_wrap(self._forecast_tab), "4. Forecast Factory")
         
         # disable tabs until data is ready
         for i in range(1, 4):
@@ -676,5 +771,14 @@ class MainWindow(QMainWindow):
         
         # run memory cleanup
         self._memory_manager.force_cleanup()
+
+        # persist window geometry to session preferences
+        try:
+            geo = self.geometry()
+            geom_dict = {"x": geo.x(), "y": geo.y(), "w": geo.width(), "h": geo.height()}
+            if hasattr(self, "_session") and getattr(self._session, "set_preference", None):
+                self._session.set_preference("window_geometry", geom_dict)
+        except Exception:
+            pass
         
         event.accept()

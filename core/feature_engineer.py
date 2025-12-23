@@ -286,30 +286,91 @@ class FeatureEngineer:
                               tier_mapping: Dict[str, str],
                               price_col: Optional[str] = None,
                               promo_col: Optional[str] = None,
-                              progress_callback: Optional[callable] = None) -> pd.DataFrame:
+                              progress_callback: Optional[callable] = None,
+                              parallel: bool = False,
+                              max_workers: int = 4,
+                              use_processes: bool = False) -> pd.DataFrame:
         # create features for all skus with tier-appropriate feature sets
         
         results = []
-        skus = df[sku_col].unique()
-        total = len(skus)
-        
-        for i, sku in enumerate(skus):
-            # get sku data
-            sku_df = df[df[sku_col] == sku].copy()
-            
+        grouped = df.groupby(sku_col)
+        total = len(grouped)
+
+        if parallel and max_workers and max_workers > 1:
+            # support threaded or process-based parallelism
+            if use_processes:
+                from concurrent.futures import ProcessPoolExecutor, as_completed
+
+                futures = {}
+                with ProcessPoolExecutor(max_workers=max_workers) as exe:
+                    for sku, sku_df in grouped:
+                        sku_df = sku_df.copy()
+                        tier = tier_mapping.get(sku, "C")
+                        feature_set = self.get_feature_set_for_tier(tier)
+                        # send minimal args to worker (function is picklable)
+                        futures[exe.submit(self.create_features, sku_df, date_col, qty_col, feature_set, price_col, promo_col)] = sku
+
+                    for fut in as_completed(futures):
+                        sku = futures[fut]
+                        try:
+                            featured_df = fut.result()
+                            results.append(featured_df)
+                        except Exception:
+                            continue
+
+                        if progress_callback:
+                            percent = len(results) / total * 100
+                            progress_callback(percent, sku)
+
+                if results:
+                    return pd.concat(results, ignore_index=True)
+                return pd.DataFrame()
+            else:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                futures = {}
+                with ThreadPoolExecutor(max_workers=max_workers) as exe:
+                    for sku, sku_df in grouped:
+                        sku_df = sku_df.copy()
+                        tier = tier_mapping.get(sku, "C")
+                        feature_set = self.get_feature_set_for_tier(tier)
+                        futures[exe.submit(self.create_features, sku_df, date_col, qty_col, feature_set, price_col, promo_col)] = sku
+
+                    for fut in as_completed(futures):
+                        sku = futures[fut]
+                        try:
+                            featured_df = fut.result()
+                            results.append(featured_df)
+                        except Exception:
+                            continue
+
+                        if progress_callback:
+                            percent = len(results) / total * 100
+                            progress_callback(percent, sku)
+
+                if results:
+                    return pd.concat(results, ignore_index=True)
+                return pd.DataFrame()
+
+        for i, (sku, sku_df) in enumerate(grouped):
+            sku_df = sku_df.copy()
+
             # determine feature set based on tier
             tier = tier_mapping.get(sku, "C")
             feature_set = self.get_feature_set_for_tier(tier)
-            
+
             # create features
             featured_df = self.create_features(
                 sku_df, date_col, qty_col, feature_set, price_col, promo_col
             )
-            
+
             results.append(featured_df)
-            
-            # progress callback
-            if progress_callback and i % 100 == 0:
-                progress_callback(i / total * 100)
-        
-        return pd.concat(results, ignore_index=True)
+
+            # progress callback with standardized signature (percent, sku)
+            if progress_callback:
+                percent = (i + 1) / total * 100
+                progress_callback(percent, sku)
+
+        if results:
+            return pd.concat(results, ignore_index=True)
+        return pd.DataFrame()

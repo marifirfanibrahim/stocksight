@@ -458,31 +458,34 @@ class DataProcessor:
         
         if progress_callback:
             progress_callback(30, "calculating volumes")
-        
+
         sku_volume = self.processed_data.groupby(sku_col)[qty_col].sum().sort_values(ascending=False)
-        
+
         if progress_callback:
             progress_callback(60, "classifying items")
-        
+
         total_volume = sku_volume.sum()
-        cumulative_pct = (sku_volume.cumsum() / total_volume * 100).values
-        
+        if total_volume == 0:
+            return {"A": [], "B": [], "C": []}
+
+        cumulative = sku_volume.cumsum() / total_volume * 100
+
         a_threshold = config.CLUSTERING["volume_percentiles"]["A"]
         b_threshold = config.CLUSTERING["volume_percentiles"]["B"]
-        
-        classification = {"A": [], "B": [], "C": []}
-        
-        for i, (sku, _) in enumerate(sku_volume.items()):
-            if cumulative_pct[i] <= a_threshold:
-                classification["A"].append(sku)
-            elif cumulative_pct[i] <= a_threshold + b_threshold:
-                classification["B"].append(sku)
-            else:
-                classification["C"].append(sku)
-        
+
+        a_cut = cumulative <= a_threshold
+        b_cut = (cumulative > a_threshold) & (cumulative <= a_threshold + b_threshold)
+        c_cut = cumulative > (a_threshold + b_threshold)
+
+        classification = {
+            "A": sku_volume.index[a_cut].tolist(),
+            "B": sku_volume.index[b_cut].tolist(),
+            "C": sku_volume.index[c_cut].tolist()
+        }
+
         if progress_callback:
             progress_callback(100, "complete")
-        
+
         return classification
     
     # ---------- DATA ACCESS ----------

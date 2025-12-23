@@ -52,9 +52,6 @@ def setup_application():
 
 
 def main():
-    # ensure directories exist
-    config.ensure_directories()
-    
     # setup logging
     logger = setup_logging()
     logger.info(f"starting {config.APP_NAME} v{config.APP_VERSION}")

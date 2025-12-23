@@ -75,7 +75,11 @@ class WorkerRunnable(QRunnable):
         # emit progress signal
         if self.is_cancelled:
             raise InterruptedError("operation cancelled")
-        
+        # support either (value) or (value, text) callers
+        if isinstance(value, (list, tuple)) and len(value) >= 1:
+            # defensive: handle a single iterable passed accidentally
+            value = value[0]
+
         self.signals.progress.emit(int(value))
         if text:
             self.signals.progress_text.emit(text)
@@ -140,7 +144,10 @@ class WorkerThread(QThread):
         # emit progress signals
         if self.is_cancelled:
             raise InterruptedError("operation cancelled")
-        
+        # support either (value) or (value, text) callers
+        if isinstance(value, (list, tuple)) and len(value) >= 1:
+            value = value[0]
+
         self.progress_signal.emit(int(value))
         if text:
             self.progress_text_signal.emit(text)

@@ -14,6 +14,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import config
+from utils.logging_config import get_logger
 
 
 # ============================================================================
@@ -339,7 +340,9 @@ class Forecaster:
                 "upper": upper,
                 "metrics": metrics
             }
-        except Exception:
+        except Exception as e:
+            logger = get_logger()
+            logger.exception("ExponentialSmoothing failed: %s", e)
             return self._naive_forecast(ts, horizon, frequency)
     
     # ---------- BALANCED MODELS ----------
@@ -378,6 +381,8 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
+            logger = get_logger()
+            logger.exception("ARIMA failed for ts: falling back to ExpSmoothing")
             return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     def _theta_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
@@ -417,6 +422,8 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
+            logger = get_logger()
+            logger.exception("ThetaModel failed: falling back to ExpSmoothing")
             return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     def _prophet_forecast(self, ts: pd.Series, horizon: int, frequency: str = "D") -> Dict:
@@ -461,6 +468,8 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
+            logger = get_logger()
+            logger.exception("Prophet failed: falling back to ExpSmoothing")
             return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     # ---------- ADVANCED MODELS ----------
@@ -538,6 +547,8 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
+            logger = get_logger()
+            logger.exception("LightGBM forecast failed: falling back to ExpSmoothing")
             return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     def _xgboost_forecast(self,
@@ -612,6 +623,8 @@ class Forecaster:
                 "metrics": metrics
             }
         except Exception:
+            logger = get_logger()
+            logger.exception("XGBoost forecast failed: falling back to ExpSmoothing")
             return self._exponential_smoothing_forecast(ts, horizon, frequency)
     
     def _ensemble_forecast(self,
@@ -706,12 +719,31 @@ class Forecaster:
         updated = features.copy()
         
         # update lag features
-        if "lag_1" in updated.columns:
-            updated["lag_1"] = new_value
+        # shift lag_N columns correctly: lag_k <- previous lag_{k-1}, lag_1 <- new_value
+        lag_cols = [c for c in updated.columns if c.startswith("lag_")]
+        if lag_cols:
+            # extract numeric part and sort descending
+            def lag_num(name):
+                try:
+                    return int(name.split("_")[1])
+                except Exception:
+                    return 0
+
+            lag_cols_sorted = sorted(lag_cols, key=lag_num, reverse=True)
+
+            # for highest lags, set them from previous lower lag values
+            for col in lag_cols_sorted:
+                n = lag_num(col)
+                if n == 1:
+                    updated[col] = new_value
+                else:
+                    prev_col = f"lag_{n-1}"
+                    if prev_col in updated.columns:
+                        updated[col] = updated[prev_col].values[0]
         
         # update time index
         if "time_idx" in updated.columns:
-            updated["time_idx"] = updated["time_idx"].values[0] + step + 1
+            updated["time_idx"] = updated["time_idx"].values[0] + 1
         
         # update date features for next period
         if "day_of_week" in updated.columns:
@@ -766,31 +798,139 @@ class Forecaster:
                        frequency: str = "D",
                        tier_mapping: Optional[Dict[str, str]] = None,
                        features: Optional[List[str]] = None,
-                       progress_callback: Optional[callable] = None) -> Dict[str, ForecastResult]:
+                       progress_callback: Optional[callable] = None,
+                       parallel: bool = False,
+                       max_workers: int = 4,
+                       use_processes: bool = False) -> Dict[str, ForecastResult]:
         # forecast multiple skus with strategy selection
         
         results = {}
-        skus = df[sku_col].unique()
-        total = len(skus)
-        
-        for i, sku in enumerate(skus):
-            # get sku data
-            sku_df = df[df[sku_col] == sku].copy()
-            
+        grouped = df.groupby(sku_col)
+        total = len(grouped)
+
+        if parallel and max_workers > 1:
+            if use_processes:
+                from concurrent.futures import ProcessPoolExecutor, as_completed
+
+                futures = {}
+                with ProcessPoolExecutor(max_workers=max_workers) as exe:
+                    for sku, sku_df in grouped:
+                        sku_df = sku_df.copy()
+                        # determine strategy based on tier
+                        if tier_mapping and strategy == "balanced":
+                            tier = tier_mapping.get(sku, "C")
+                            sku_strategy = "simple" if tier == "C" else strategy
+                        else:
+                            sku_strategy = strategy
+
+                        futures[exe.submit(self.forecast, sku_df, date_col, qty_col, sku_strategy, horizon, frequency, features)] = sku
+
+                    for fut in as_completed(futures):
+                        sku = futures[fut]
+                        try:
+                            result = fut.result()
+                            result.sku = sku
+                            results[sku] = result
+                        except Exception as e:
+                            # fallback to naive and log
+                            try:
+                                from utils.logging_config import get_logger
+                                logger = get_logger()
+                                logger.exception("Forecast failed for SKU %s in process pool: %s", sku, e)
+                            except Exception:
+                                pass
+
+                            try:
+                                aggregated = self.aggregate_to_frequency(df[df[sku_col] == sku], date_col, qty_col, frequency)
+                                ts = aggregated.set_index(aggregated.columns[0])[aggregated.columns[1]]
+                                horizon_periods = self.get_horizon_periods(horizon, frequency)
+                                naive_result = self._naive_forecast(ts, horizon_periods, frequency)
+                                results[sku] = ForecastResult(
+                                    sku=sku,
+                                    model="naive",
+                                    forecast=naive_result["forecast"],
+                                    dates=naive_result["dates"],
+                                    lower_bound=naive_result["lower"],
+                                    upper_bound=naive_result["upper"],
+                                    metrics=naive_result["metrics"],
+                                    frequency=frequency
+                                )
+                            except Exception:
+                                continue
+
+                        if progress_callback:
+                            progress_callback((len(results)) / total * 100, sku)
+
+                self.results = results
+                return results
+            else:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                futures = {}
+                with ThreadPoolExecutor(max_workers=max_workers) as exe:
+                    for sku, sku_df in grouped:
+                        sku_df = sku_df.copy()
+                        # determine strategy based on tier
+                        if tier_mapping and strategy == "balanced":
+                            tier = tier_mapping.get(sku, "C")
+                            sku_strategy = "simple" if tier == "C" else strategy
+                        else:
+                            sku_strategy = strategy
+
+                        futures[exe.submit(self.forecast, sku_df, date_col, qty_col, sku_strategy, horizon, frequency, features)] = sku
+
+                    for fut in as_completed(futures):
+                        sku = futures[fut]
+                        try:
+                            result = fut.result()
+                            result.sku = sku
+                            results[sku] = result
+                        except Exception as e:
+                            try:
+                                from utils.logging_config import get_logger
+                                logger = get_logger()
+                                logger.exception("Forecast failed for SKU %s in thread pool: %s", sku, e)
+                            except Exception:
+                                pass
+
+                            try:
+                                aggregated = self.aggregate_to_frequency(df[df[sku_col] == sku], date_col, qty_col, frequency)
+                                ts = aggregated.set_index(aggregated.columns[0])[aggregated.columns[1]]
+                                horizon_periods = self.get_horizon_periods(horizon, frequency)
+                                naive_result = self._naive_forecast(ts, horizon_periods, frequency)
+                                results[sku] = ForecastResult(
+                                    sku=sku,
+                                    model="naive",
+                                    forecast=naive_result["forecast"],
+                                    dates=naive_result["dates"],
+                                    lower_bound=naive_result["lower"],
+                                    upper_bound=naive_result["upper"],
+                                    metrics=naive_result["metrics"],
+                                    frequency=frequency
+                                )
+                            except Exception:
+                                continue
+
+                        if progress_callback:
+                            progress_callback((len(results)) / total * 100, sku)
+
+                self.results = results
+                return results
+
+        for i, (sku, sku_df) in enumerate(grouped):
+            sku_df = sku_df.copy()
+
             # determine strategy based on tier
             if tier_mapping and strategy == "balanced":
                 tier = tier_mapping.get(sku, "C")
-                if tier == "C":
-                    sku_strategy = "simple"
-                else:
-                    sku_strategy = strategy
+                sku_strategy = "simple" if tier == "C" else strategy
             else:
                 sku_strategy = strategy
-            
+
             # generate forecast
             try:
                 result = self.forecast(
-                    sku_df, date_col, qty_col, 
+                    sku_df, date_col, qty_col,
                     sku_strategy, horizon, frequency, features
                 )
                 result.sku = sku
@@ -811,11 +951,11 @@ class Forecaster:
                     metrics=naive_result["metrics"],
                     frequency=frequency
                 )
-            
-            # progress callback
+
+            # progress callback with standardized signature
             if progress_callback:
                 progress_callback((i + 1) / total * 100, sku)
-        
+
         self.results = results
         return results
     

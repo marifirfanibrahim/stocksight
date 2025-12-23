@@ -441,6 +441,7 @@ class ExploreTab(QWidget):
         worker = WorkerThread(do_detection)
         self._worker = worker
         worker.progress_signal.connect(progress.set_progress)
+        worker.progress_text_signal.connect(lambda t: progress.set_status(str(t)))
         worker.result_signal.connect(lambda r: self._on_detection_complete(r, progress))
         worker.error_signal.connect(lambda e: self._on_detection_error(e, progress))
         worker.start()

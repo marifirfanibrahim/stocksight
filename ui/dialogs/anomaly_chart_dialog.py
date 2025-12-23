@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import QApplication
 from typing import Optional, List, Dict
 import pandas as pd
 
@@ -56,7 +57,13 @@ class AnomalyChartDialog(QDialog):
         header_layout = QHBoxLayout()
         
         header = QLabel(f"Item: {self._sku}")
-        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            hdr_font = QFont(base_font.family(), max(10, base_font.pointSize() + 2), QFont.Bold)
+            header.setFont(hdr_font)
+        except Exception:
+            header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         header_layout.addWidget(header)
         
         header_layout.addStretch()

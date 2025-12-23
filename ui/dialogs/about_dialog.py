@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtWidgets import QApplication
 
 import config
 
@@ -39,14 +40,26 @@ class AboutDialog(QDialog):
         
         # app name
         name_label = QLabel(config.APP_NAME)
-        name_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            name_font = QFont(base_font.family(), max(18, base_font.pointSize() + 10), QFont.Bold)
+            name_label.setFont(name_font)
+        except Exception:
+            name_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
         name_label.setAlignment(Qt.AlignCenter)
         name_label.setStyleSheet(f"color: {config.UI_COLORS['primary']};")
         layout.addWidget(name_label)
         
         # tagline
         tagline = QLabel("Demand Forecasting for Business Analysts")
-        tagline.setFont(QFont("Segoe UI", 11))
+        try:
+            app = QApplication.instance()
+            base_font = app.font() if app is not None else QFont()
+            tag_font = QFont(base_font.family(), max(10, base_font.pointSize() - 0))
+            tagline.setFont(tag_font)
+        except Exception:
+            tagline.setFont(QFont("Segoe UI", 11))
         tagline.setAlignment(Qt.AlignCenter)
         tagline.setStyleSheet("color: gray;")
         layout.addWidget(tagline)

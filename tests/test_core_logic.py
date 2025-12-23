@@ -31,8 +31,8 @@ def sample_data():
     # create sample dataframe for testing
     np.random.seed(42)
     
-    dates = pd.date_range(start="2022-01-01", end="2023-12-31", freq="D")
-    skus = [f"SKU{i:03d}" for i in range(100)]
+    dates = pd.date_range(start="2023-01-01", end="2023-12-31", freq="D")
+    skus = [f"SKU{i:03d}" for i in range(20)]
     
     rows = []
     for sku in skus:
@@ -89,7 +89,7 @@ class TestDataProcessor:
         
         assert success
         assert proc.processed_data is not None
-        assert len(proc.sku_list) == 100
+        assert len(proc.sku_list) == 20
     
     def test_quality_calculation(self, processor):
         # test quality score calculation

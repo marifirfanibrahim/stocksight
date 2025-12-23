@@ -42,6 +42,13 @@ WINDOW_DEFAULT_HEIGHT = 900
 # ---------- THEME SETTINGS ----------
 DEFAULT_THEME = "light" 
 
+# UI settings and accessibility defaults
+UI_SETTINGS = {
+    "default_text_size": 12,
+    "text_size_options": [11, 12, 13, 14, 16],
+    "high_contrast_default": False
+}
+
 # ============================================================================
 #                             DATA PROCESSING
 # ============================================================================
@@ -338,7 +345,10 @@ PERFORMANCE = {
     "sample_size_heatmap": 100,
     "background_threads": 4,
     "cache_size_mb": 512,
-    "gc_threshold": 0.8  # trigger gc at 80% memory
+    "gc_threshold": 0.8,  # trigger gc at 80% memory
+    # parallelism defaults used by batch operations
+    "use_processes": False,
+    "max_workers": 4
 }
 
 # ---------- TIMING TARGETS ----------

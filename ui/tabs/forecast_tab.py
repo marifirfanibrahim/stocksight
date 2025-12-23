@@ -423,7 +423,10 @@ class ForecastTab(QWidget):
                 frequency=settings.get("frequency", "D"),
                 tier_mapping=tier_mapping if settings.get("tier_processing", True) else None,
                 features=feature_cols,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                parallel=True,
+                max_workers=config.PERFORMANCE.get("max_workers", 4),
+                use_processes=config.PERFORMANCE.get("use_processes", False)
             )
             
             # generate comparison if enabled
